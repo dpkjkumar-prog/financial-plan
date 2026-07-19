@@ -1082,8 +1082,17 @@ function renderSettings(){
       .map(r => '<tr><td>' + r[0] + '</td><td class="num"><b>' + r[1] + '</b></td><td style="color:var(--muted)">' + r[2] + '</td></tr>').join('') +
     '</tbody></table></div></div>' +
   '<div class="card"><h3>Google Sheet back end ' + (cloudOn() ? '<span class="pill ok">Connected</span>' : '<span class="pill">Not connected</span>') + '</h3>' +
-    '<p class="hint">With this switched on the Google Sheet <b>is</b> your database. This page pulls from it when it opens and pushes a couple of seconds after you stop typing. ' +
-    (S.profile.n2 || 'Your partner') + ' can work directly in the Sheet from any device, including her phone, and you will see her changes here.</p>' +
+    '<p class="hint">The Google Sheet is your database. This page pulls from it when it opens and pushes a couple of seconds after you stop typing. ' +
+    esc(NM2()) + ' can work directly in the Sheet from any device and you will see her changes here.</p>' +
+    (GEMAIL
+      ? '<div class="alert g" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+          '<span style="flex:1">Signed in as <b>' + esc(GEMAIL) + '</b> · session valid until ' + new Date(GEXP).toLocaleTimeString('en-IN') + '</span>' +
+          '<button class="btn sm" onclick="cloudPull()">Reload from Sheet</button>' +
+          '<button class="btn sm" onclick="cloudPush(false)">Save to Sheet</button>' +
+          '<button class="btn sm" onclick="gSignOut()">Sign out</button></div>'
+      : '') +
+    '<details class="bp"><summary>Connection settings and setup guide</summary><div class="bpin">' +
+    '<p style="margin:8px 0 0">Everything below is already configured and built into the page. You only need it if something breaks, or if you move the Sheet or redeploy the script.</p>' +
     (ONFILE ? '<div class="alert a">You have opened this file straight from your hard drive. Google sign-in cannot run that way — open your Render address instead (something like <code>https://your-planner.onrender.com</code>).</div>' : '') +
     (CFG_BUILTIN ? '<div class="alert g">Connection details came built into the page, so there was nothing to type. Just sign in below.</div>' : '') +
     (CLOUD.optOut ? '<div class="alert a">This device has been disconnected from the shared plan. <button class="btn sm" onclick="cloudUseBuiltIn()">Reconnect using the built-in details</button></div>' : '') +
@@ -1129,6 +1138,7 @@ function renderSettings(){
     '<div class="note" style="margin-top:12px"><b>How the security works now.</b> There is no shared password. You sign in with your own Google account; the browser hands the script a token Google signed; the script asks Google to verify it, checks it was issued for your app, and checks the email against its ALLOWED list. To revoke someone, delete their address from that list. Sessions last about an hour and renew silently while you are using the page.</div>' +
     '<div class="note" style="margin-top:8px"><b>Why it has to be hosted.</b> Google will not issue sign-in tokens to a page opened from your hard drive — it has no verifiable web address. Render gives the page a real HTTPS address, which also means ' + esc(NM2()) + ' can open this same interface on her phone. The page itself holds none of your figures — they live in the Sheet — so it is safe even though the address is public. Anyone who finds it sees an empty planner and cannot sign in unless their Google account is on the ALLOWED list.</div>' +
     '<div class="note" style="margin-top:8px"><b>Conflicts.</b> Before every push this page checks whether the Sheet moved since it last looked. If ' + esc(NM2()) + ' has edited in the meantime it stops and asks you which version to keep. It also checks every thirty seconds and tells you when she has saved something new.</div>' +
+    '</div></details>' +
   '</div>' +
   '<div class="card"><h3>Sharing without the Sheet</h3>' +
     '<p class="hint">The plan lives in one JSON file. Keep it in a folder you both sync — OneDrive, Google Drive or Dropbox — and this page reads and writes that file directly. Nothing is sent to any server; your cloud folder does the moving.</p>' +
@@ -1345,6 +1355,7 @@ function gOnCred(resp){
   } catch(e){}
   if (G_RES){ const r = G_RES; G_RES = G_REJ = null; r(GTOKEN); }
   banner(''); renderAll();
+  if (cloudOn() && !CSEEN) cloudPull(true);   // straight into the plan after sign-in
 }
 function gSignIn(){
   return new Promise((res, rej) => {
@@ -1367,6 +1378,7 @@ function gSignIn(){
 }
 function gSignOut(){
   GTOKEN = ''; GEXP = 0; GEMAIL = ''; GNAME = '';
+  GATE_OFF = false; CSEEN = '';
   try { google.accounts.id.disableAutoSelect(); } catch(e){}
   renderAll();
 }
@@ -1498,8 +1510,46 @@ function cloudStatusText(){
            off:'' }[CSTATE] || '';
 }
 
+/* ============================ SIGN-IN GATE ============================
+   When the Sheet is the back end, there is nothing worth showing until the
+   person has proved who they are — so the whole planner waits behind this. */
+function needGate(){ return cloudOn() && isGoogleMode() && !GEMAIL && !ONFILE; }
+
+function renderGate(){
+  document.getElementById('tabbar').innerHTML = '';
+  TABS.forEach(t => document.getElementById('p-' + t[0]).classList.toggle('active', t[0] === 'dashboard'));
+  document.getElementById('p-dashboard').innerHTML =
+  '<div style="max-width:560px;margin:60px auto 0">' +
+    '<div class="card" style="text-align:center;padding:34px 28px">' +
+      '<div style="font-size:34px;line-height:1;margin-bottom:14px">🔒</div>' +
+      '<h2 class="ttl" style="margin-bottom:8px">Family Financial Planner</h2>' +
+      '<p class="sub" style="margin:0 auto 22px;max-width:400px">Sign in with your Google account to open the plan. Only accounts on the household list can get in.</p>' +
+      '<div id="gBtn" style="display:flex;justify-content:center;min-height:44px"></div>' +
+      '<div id="cloudMsg" style="margin-top:6px"></div>' +
+      '<p class="tag" style="margin-top:20px">Your figures live in a private Google Sheet, not on this page.<br>Nothing is stored on this website.</p>' +
+    '</div>' +
+    '<details class="bp" style="margin-top:4px"><summary>Trouble signing in?</summary><div class="bpin">' +
+      '<ul>' +
+        '<li><b>Nothing happens when you click.</b> Your browser may be blocking third-party sign-in pop-ups. Allow them for this site and reload.</li>' +
+        '<li><b>"Not on the allowed list".</b> That Google account has not been added to the plan. It has to be added to the ALLOWED list in the Sheet\'s Apps Script.</li>' +
+        '<li><b>Wrong Google account.</b> If you are signed into several, sign out of the others or use a private window.</li>' +
+      '</ul>' +
+      '<div class="toolbar" style="margin:12px 0 0">' +
+        '<button class="btn sm" onclick="cloudTest()">Test the connection</button>' +
+        '<button class="btn sm" onclick="gateBypass()">Open without signing in</button>' +
+      '</div>' +
+      '<p style="margin:10px 0 0;font-size:12px">Opening without signing in gives you an empty planner on this device only — nothing loads from the Sheet and nothing saves back to it. It is there so a configuration problem cannot lock you out entirely.</p>' +
+    '</div></details>' +
+  '</div>';
+  flagStatus();
+  setTimeout(gRenderButton, 0);
+}
+let GATE_OFF = false;
+function gateBypass(){ GATE_OFF = true; renderAll(); }
+
 /* ============================ BOOT ============================ */
 function renderAll(){
+  if (needGate() && !GATE_OFF){ renderGate(); return; }
   document.getElementById('brandSub').textContent = (S.profile.n1 && S.profile.n2) ? (S.profile.n1 + ' & ' + S.profile.n2 + ' · goal-based plan') : 'Goal-based planning workspace';
   renderTabs();
   if (TAB === 'dashboard') renderDashboard();
