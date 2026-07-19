@@ -84,6 +84,19 @@ input.num{text-align:right}
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
 .tag{font-size:11px;color:var(--muted)}
 svg text{font-family:inherit}
+details.bp{background:#FFFBEF;border:1px solid #F0E2BD;border-radius:var(--r);margin-bottom:18px;overflow:hidden}
+details.bp>summary{cursor:pointer;padding:12px 16px;font-weight:700;font-size:13.5px;color:#5C4A16;list-style:none;display:flex;align-items:center;gap:9px}
+details.bp>summary::-webkit-details-marker{display:none}
+details.bp>summary::before{content:'▸';font-size:12px;transition:transform .15s;display:inline-block}
+details.bp[open]>summary::before{transform:rotate(90deg)}
+details.bp>summary:hover{background:#FDF6E3}
+details.bp .bpin{padding:2px 16px 14px 38px;font-size:13px;color:#4A3D14;border-top:1px solid #F0E2BD}
+details.bp .bpin ul{margin:10px 0 0;padding-left:18px}
+details.bp .bpin li{margin-bottom:7px}
+details.bp .bpin li b{color:#3D3210}
+.empty{text-align:center;padding:34px 20px;color:var(--muted)}
+.empty h4{margin:0 0 6px;font-size:16px;color:var(--ink)}
+.empty p{margin:0 auto 14px;max-width:520px;font-size:13px}
 .foot{color:var(--muted);font-size:11.5px;text-align:center;padding:20px 10px 0;max-width:900px;margin:0 auto}
 .saveflag{font-size:12px;color:#CFE0F5}
 #banner:empty{display:none}
@@ -130,6 +143,22 @@ svg text{font-family:inherit}
 </main>
 
 <script>
+/* ============================================================================
+   SITE CONFIG — the only two lines you ever need to edit in this file.
+
+   Filling these in means any new device (Prans's phone, a new laptop, a fresh
+   browser) connects to your Sheet automatically and only has to sign in.
+
+   Neither value is a secret. The Client ID is a public identifier by design,
+   and the /exec URL is useless to anyone whose Google account is not on the
+   ALLOWED list inside the Apps Script. Both are safe to commit to GitHub.
+
+   To change them later: edit here, commit, and Render redeploys in a minute.
+   Anything saved in a browser's Settings tab overrides these.
+   ========================================================================== */
+const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbx-k8gJf2Cm5soym23OruXyDSiqLpy05QUD5gcWDxrVaJPKeDcL2Gv0I9sjHZbd8G2l/exec';
+const DEFAULT_CLIENT_ID = '918006623402-kbm6lo0218ku43rdfs1dnaf5hq0cn7ka.apps.googleusercontent.com';
+
 /* ============================ UTILITIES ============================ */
 const CY = new Date().getFullYear();
 const uid = () => 'x' + Math.random().toString(36).slice(2, 9);
@@ -227,69 +256,85 @@ function researchLinks(g){
 /* ============================ TEMPLATE DATA ============================ */
 function template(){
   return {
-    profile:{ n1:'Dee', a1:38, ret1:60, n2:'Prans', a2:36, ret2:58, lifeExp:90, genInfl:6, emgMonths:6, healthTarget:10000000, disc:8, share:70 },
-    income:[
-      { id:uid(), label:'Dee — business / professional income', owner:'Dee', monthly:600000 },
-      { id:uid(), label:'Spouse — salary', owner:'Wife', monthly:250000 },
-      { id:uid(), label:'Rental income', owner:'Joint', monthly:60000 },
-      { id:uid(), label:'Portfolio income (dividend / interest)', owner:'Joint', monthly:40000 }
-    ],
-    expenses:[
-      { id:uid(), label:'Household & groceries', cat:'Living', monthly:90000, infl:6 },
-      { id:uid(), label:'Home loan EMI', cat:'Debt', monthly:90000, infl:0 },
-      { id:uid(), label:'Car loan EMI', cat:'Debt', monthly:22000, infl:0 },
-      { id:uid(), label:'School fees & activities', cat:'Education', monthly:60000, infl:10 },
-      { id:uid(), label:'Utilities, help & maintenance', cat:'Living', monthly:35000, infl:6 },
-      { id:uid(), label:'Dining, lifestyle & shopping', cat:'Lifestyle', monthly:55000, infl:6 },
-      { id:uid(), label:'Insurance premiums', cat:'Protection', monthly:22000, infl:5 },
-      { id:uid(), label:'Health & wellness', cat:'Living', monthly:18000, infl:9 },
-      { id:uid(), label:'Parents / family support', cat:'Family', monthly:40000, infl:7 },
-      { id:uid(), label:'Discretionary & miscellaneous', cat:'Lifestyle', monthly:25000, infl:6 }
-    ],
-    assets:[
-      { id:uid(), label:'Indian equity mutual funds', cls:'Indian Equity', str:'Mutual Fund', owner:'Joint', value:12000000, ret:12, earmark:'' },
-      { id:uid(), label:'PMS — multicap', cls:'Indian Equity', str:'PMS', owner:'Dee', value:8000000, ret:12.5, earmark:'' },
-      { id:uid(), label:'AIF Cat III — long-short', cls:'Alternatives', str:'AIF', owner:'Dee', value:5000000, ret:12, earmark:'' },
-      { id:uid(), label:'Direct equity portfolio', cls:'Indian Equity', str:'Direct Equity', owner:'Dee', value:4000000, ret:12, earmark:'' },
-      { id:uid(), label:'International / US tech feeder', cls:'International Equity', str:'International Feeder', owner:'Joint', value:3500000, ret:11, earmark:'' },
-      { id:uid(), label:'Debt funds & bonds', cls:'Debt / Fixed Income', str:'Bonds / NCD', owner:'Joint', value:6000000, ret:7.2, earmark:'' },
-      { id:uid(), label:'EPF + PPF', cls:'Retirement (EPF/PPF/NPS)', str:'EPF / PPF / NPS', owner:'Joint', value:4500000, ret:7.5, earmark:'' },
-      { id:uid(), label:'NPS Tier-1', cls:'Retirement (EPF/PPF/NPS)', str:'EPF / PPF / NPS', owner:'Dee', value:2000000, ret:9, earmark:'' },
-      { id:uid(), label:'Gold & SGB', cls:'Gold & Commodities', str:'Physical / SGB', owner:'Joint', value:2500000, ret:7, earmark:'' },
-      { id:uid(), label:'Second property (let out)', cls:'Real Estate', str:'Property', owner:'Joint', value:22000000, ret:6.5, earmark:'' },
-      { id:uid(), label:'Bank balance & liquid funds', cls:'Cash & Liquid', str:'Bank / Liquid', owner:'Joint', value:3000000, ret:5.5, earmark:'' }
-    ],
-    liabilities:[
-      { id:uid(), label:'Home loan', outstanding:8500000, rate:8.6, emi:90000, endYear:CY+12 },
-      { id:uid(), label:'Car loan', outstanding:800000, rate:9.2, emi:22000, endYear:CY+3 }
-    ],
-    goals:[
-      { id:uid(), name:'Emergency fund top-up', owner:'Joint', category:'Emergency Fund', targetYear:CY+1, cost:3600000, infl:6, ret:6.5, corpus:3000000, sip:50000, priority:'Critical', notes:'Target = 6 months of full household outgo including EMIs.', src:'', srcDate:'' },
-      { id:uid(), name:'Parents healthcare buffer', owner:'Joint', category:'Healthcare', targetYear:CY+2, cost:2000000, infl:12, ret:7, corpus:500000, sip:15000, priority:'Critical', notes:'Ring-fenced for uninsured / co-pay medical costs.', src:'', srcDate:'' },
-      { id:uid(), name:'Car replacement', owner:'Dee', category:'Vehicle', targetYear:CY+3, cost:2500000, infl:6, ret:8, corpus:400000, sip:20000, priority:'Flexible', notes:'', src:'', srcDate:'' },
-      { id:uid(), name:'Spouse business / passion fund', owner:'Wife', category:'Business', targetYear:CY+4, cost:3000000, infl:7, ret:9, corpus:600000, sip:20000, priority:'Important', notes:'Seed capital, kept liquid enough to deploy at short notice.', src:'', srcDate:'' },
-      { id:uid(), name:'Home upgrade — larger residence', owner:'Joint', category:'Home', targetYear:CY+5, cost:15000000, infl:7, ret:9.5, corpus:4000000, sip:60000, priority:'Important', notes:'Net of expected sale proceeds from current home.', src:'', srcDate:'' },
-      { id:uid(), name:'Child — undergraduate education', owner:'Joint', category:'Education', targetYear:CY+12, cost:2500000, infl:10, ret:12, corpus:800000, sip:15000, priority:'Critical', notes:'4-year Indian private university, all-in.', src:'', srcDate:'' },
-      { id:uid(), name:'Child — post-graduate / overseas', owner:'Joint', category:'Education', targetYear:CY+16, cost:6000000, infl:10, ret:12, corpus:500000, sip:12000, priority:'Important', notes:'Two-year masters abroad including living costs.', src:'', srcDate:'' },
-      { id:uid(), name:'Financial independence corpus', owner:'Joint', category:'Wealth Creation', targetYear:CY+14, cost:50000000, infl:6, ret:12, corpus:4000000, sip:60000, priority:'Important', notes:'Optional-work corpus, separate from the retirement plan.', src:'', srcDate:'' },
-      { id:uid(), name:'Child — marriage', owner:'Joint', category:'Marriage', targetYear:CY+24, cost:4000000, infl:8, ret:11, corpus:300000, sip:3000, priority:'Flexible', notes:'', src:'', srcDate:'' }
-    ],
-    trips:[
-      { id:uid(), dest:'Ladakh road trip', year:CY+1, cost:250000, pax:4, infl:7, saved:60000, notes:'June departure, self-drive.' },
-      { id:uid(), dest:'Japan — cherry blossom', year:CY+2, cost:600000, pax:4, infl:7, saved:100000, notes:'Late March / early April.' },
-      { id:uid(), dest:'Maldives — anniversary', year:CY+3, cost:400000, pax:2, infl:7, saved:0, notes:'Just the two of us.' },
-      { id:uid(), dest:'Europe — family summer', year:CY+5, cost:1200000, pax:4, infl:7, saved:0, notes:'3 countries, 18 days.' }
-    ],
-    insurance:[
-      { id:uid(), type:'Term life', person:'Dee', cover:50000000, premium:65000, provider:'', renew:'' },
-      { id:uid(), type:'Term life', person:'Wife', cover:20000000, premium:28000, provider:'', renew:'' },
-      { id:uid(), type:'Health floater', person:'Family', cover:5000000, premium:85000, provider:'', renew:'' },
-      { id:uid(), type:'Super top-up health', person:'Family', cover:10000000, premium:35000, provider:'', renew:'' },
-      { id:uid(), type:'Personal accident', person:'Dee', cover:20000000, premium:22000, provider:'', renew:'' },
-      { id:uid(), type:'Critical illness', person:'Dee', cover:5000000, premium:30000, provider:'', renew:'' }
-    ],
-    retirement:{ monthlyExp:250000, infl:6, preRet:11, postRet:8, corpus:15000000, sip:75000, whose:'Dee' }
+    /* Blank by design — fill it in with your own figures.
+       The rates below are starting assumptions, not data; change them to suit. */
+    profile:{ n1:'', a1:'', ret1:60, n2:'', a2:'', ret2:58, lifeExp:90,
+              genInfl:6, emgMonths:6, healthTarget:'', disc:8, share:70 },
+    income:[], expenses:[], assets:[], liabilities:[],
+    goals:[], trips:[], insurance:[],
+    retirement:{ monthlyExp:'', infl:6, preRet:11, postRet:8, corpus:'', sip:'', whose:'Dee' },
+    meta:{}
   };
+}
+
+/* A worked example, available on demand from the Settings tab. Useful for seeing
+   how the maths behaves before you trust it with your own numbers. */
+function sampleData(){
+  const t = template();
+  t.profile = { n1:'Dee', a1:38, ret1:60, n2:'Prans', a2:36, ret2:58, lifeExp:90,
+                genInfl:6, emgMonths:6, healthTarget:10000000, disc:8, share:70 };
+  t.income = [
+    { id:uid(), label:'Business / professional income', owner:'Dee', monthly:600000 },
+    { id:uid(), label:'Spouse — salary', owner:'Wife', monthly:250000 },
+    { id:uid(), label:'Rental income', owner:'Joint', monthly:60000 },
+    { id:uid(), label:'Portfolio income (dividend / interest)', owner:'Joint', monthly:40000 }
+  ];
+  t.expenses = [
+    { id:uid(), label:'Household & groceries', cat:'Living', monthly:90000, infl:6 },
+    { id:uid(), label:'Home loan EMI', cat:'Debt', monthly:90000, infl:0 },
+    { id:uid(), label:'Car loan EMI', cat:'Debt', monthly:22000, infl:0 },
+    { id:uid(), label:'School fees & activities', cat:'Education', monthly:60000, infl:10 },
+    { id:uid(), label:'Utilities, help & maintenance', cat:'Living', monthly:35000, infl:6 },
+    { id:uid(), label:'Dining, lifestyle & shopping', cat:'Lifestyle', monthly:55000, infl:6 },
+    { id:uid(), label:'Insurance premiums', cat:'Protection', monthly:22000, infl:5 },
+    { id:uid(), label:'Health & wellness', cat:'Living', monthly:18000, infl:9 },
+    { id:uid(), label:'Parents / family support', cat:'Family', monthly:40000, infl:7 },
+    { id:uid(), label:'Discretionary & miscellaneous', cat:'Lifestyle', monthly:25000, infl:6 }
+  ];
+  t.assets = [
+    { id:uid(), label:'Indian equity mutual funds', cls:'Indian Equity', str:'Mutual Fund', owner:'Joint', value:12000000, ret:12, earmark:'' },
+    { id:uid(), label:'PMS — multicap', cls:'Indian Equity', str:'PMS', owner:'Dee', value:8000000, ret:12.5, earmark:'' },
+    { id:uid(), label:'AIF Cat III — long-short', cls:'Alternatives', str:'AIF', owner:'Dee', value:5000000, ret:12, earmark:'' },
+    { id:uid(), label:'Direct equity portfolio', cls:'Indian Equity', str:'Direct Equity', owner:'Dee', value:4000000, ret:12, earmark:'' },
+    { id:uid(), label:'International / US tech feeder', cls:'International Equity', str:'International Feeder', owner:'Joint', value:3500000, ret:11, earmark:'' },
+    { id:uid(), label:'Debt funds & bonds', cls:'Debt / Fixed Income', str:'Bonds / NCD', owner:'Joint', value:6000000, ret:7.2, earmark:'' },
+    { id:uid(), label:'EPF + PPF', cls:'Retirement (EPF/PPF/NPS)', str:'EPF / PPF / NPS', owner:'Joint', value:4500000, ret:7.5, earmark:'Retirement' },
+    { id:uid(), label:'NPS Tier-1', cls:'Retirement (EPF/PPF/NPS)', str:'EPF / PPF / NPS', owner:'Dee', value:2000000, ret:9, earmark:'Retirement' },
+    { id:uid(), label:'Gold & SGB', cls:'Gold & Commodities', str:'Physical / SGB', owner:'Joint', value:2500000, ret:7, earmark:'' },
+    { id:uid(), label:'Second property (let out)', cls:'Real Estate', str:'Property', owner:'Joint', value:22000000, ret:6.5, earmark:'' },
+    { id:uid(), label:'Bank balance & liquid funds', cls:'Cash & Liquid', str:'Bank / Liquid', owner:'Joint', value:3000000, ret:5.5, earmark:'Emergency fund' }
+  ];
+  t.liabilities = [
+    { id:uid(), label:'Home loan', outstanding:8500000, rate:8.6, emi:90000, endYear:CY+12 },
+    { id:uid(), label:'Car loan', outstanding:800000, rate:9.2, emi:22000, endYear:CY+3 }
+  ];
+  t.goals = [
+    { id:uid(), name:'Emergency fund top-up', owner:'Joint', category:'Emergency Fund', targetYear:CY+1, cost:3600000, infl:6, ret:6.5, corpus:3000000, sip:50000, priority:'Critical', notes:'Six months of full household outgo including EMIs.', src:'', srcDate:'' },
+    { id:uid(), name:'Parents healthcare buffer', owner:'Joint', category:'Healthcare', targetYear:CY+2, cost:2000000, infl:12, ret:7, corpus:500000, sip:15000, priority:'Critical', notes:'', src:'', srcDate:'' },
+    { id:uid(), name:'Car replacement', owner:'Dee', category:'Vehicle', targetYear:CY+3, cost:2500000, infl:6, ret:8, corpus:400000, sip:20000, priority:'Flexible', notes:'', src:'', srcDate:'' },
+    { id:uid(), name:'Spouse business / passion fund', owner:'Wife', category:'Business', targetYear:CY+4, cost:3000000, infl:7, ret:9, corpus:600000, sip:20000, priority:'Important', notes:'', src:'', srcDate:'' },
+    { id:uid(), name:'Home upgrade', owner:'Joint', category:'Home', targetYear:CY+5, cost:15000000, infl:7, ret:9.5, corpus:4000000, sip:60000, priority:'Important', notes:'Net of expected sale proceeds.', src:'', srcDate:'' },
+    { id:uid(), name:'Child — undergraduate education', owner:'Joint', category:'Education', targetYear:CY+12, cost:2500000, infl:10, ret:12, corpus:800000, sip:15000, priority:'Critical', notes:'', src:'', srcDate:'' },
+    { id:uid(), name:'Financial independence corpus', owner:'Joint', category:'Wealth Creation', targetYear:CY+14, cost:50000000, infl:6, ret:12, corpus:4000000, sip:60000, priority:'Important', notes:'', src:'', srcDate:'' },
+    { id:uid(), name:'Child — post-graduate / overseas', owner:'Joint', category:'Education', targetYear:CY+16, cost:6000000, infl:10, ret:12, corpus:500000, sip:12000, priority:'Important', notes:'', src:'', srcDate:'' },
+    { id:uid(), name:'Child — marriage', owner:'Joint', category:'Marriage', targetYear:CY+24, cost:4000000, infl:8, ret:11, corpus:300000, sip:3000, priority:'Flexible', notes:'', src:'', srcDate:'' }
+  ];
+  t.trips = [
+    { id:uid(), dest:'Ladakh road trip', year:CY+1, cost:250000, pax:4, infl:7, saved:60000, notes:'' },
+    { id:uid(), dest:'Japan — cherry blossom', year:CY+2, cost:600000, pax:4, infl:7, saved:100000, notes:'' },
+    { id:uid(), dest:'Maldives — anniversary', year:CY+3, cost:400000, pax:2, infl:7, saved:0, notes:'' },
+    { id:uid(), dest:'Europe — family summer', year:CY+5, cost:1200000, pax:4, infl:7, saved:0, notes:'' }
+  ];
+  t.insurance = [
+    { id:uid(), type:'Term life', person:'Dee', cover:50000000, premium:65000, provider:'', renew:'' },
+    { id:uid(), type:'Term life', person:'Wife', cover:20000000, premium:28000, provider:'', renew:'' },
+    { id:uid(), type:'Health floater', person:'Family', cover:5000000, premium:85000, provider:'', renew:'' },
+    { id:uid(), type:'Super top-up health', person:'Family', cover:10000000, premium:35000, provider:'', renew:'' },
+    { id:uid(), type:'Personal accident', person:'Dee', cover:20000000, premium:22000, provider:'', renew:'' },
+    { id:uid(), type:'Critical illness', person:'Dee', cover:5000000, premium:30000, provider:'', renew:'' }
+  ];
+  t.retirement = { monthlyExp:250000, infl:6, preRet:11, postRet:8, corpus:15000000, sip:75000, whose:'Dee' };
+  return t;
 }
 
 /* ============================ STATE ============================ */
@@ -324,7 +369,16 @@ function doImport(ev){
   r.onload = () => { try { S = JSON.parse(r.result); save(); renderAll(); } catch(e){ alert('That file could not be read.'); } };
   r.readAsText(f); ev.target.value = '';
 }
-function resetAll(){ if (confirm('Replace everything with the starter template? Export first if you want to keep your data.')){ S = template(); save(); renderAll(); } }
+function resetAll(){
+  if (confirm('Clear every figure and start from an empty plan?\n\nIf the Google Sheet is connected, this blanks the Sheet too. Export a backup first if you might want any of it back.')){
+    S = template(); normalise(); save(); renderAll();
+  }
+}
+function loadSample(){
+  if (confirm('Replace everything with the worked example?\n\nUseful for seeing how the calculations behave before trusting them with your own numbers. This overwrites whatever is there now — and the Sheet, if connected.')){
+    S = sampleData(); normalise(); save(); renderAll();
+  }
+}
 
 /* ============================ CALC ENGINE ============================ */
 function goalCalc(g){
@@ -399,9 +453,11 @@ function optHtml(opts, val){
     return '<option value="' + esc(v) + '"' + (String(v) === String(val) ? ' selected' : '') + '>' + esc(l) + '</option>';
   }).join('');
 }
-function ownerOpts(){ return [['Joint','Joint'], ['Dee', S.profile.n1 || 'Dee'], ['Wife', S.profile.n2 || 'Partner']]; }
-function ownerLabel(v){ return v === 'Dee' ? (S.profile.n1 || 'Dee') : v === 'Wife' ? (S.profile.n2 || 'Partner') : v; }
-function personOpts(){ return [['Dee', S.profile.n1 || 'Dee'], ['Wife', S.profile.n2 || 'Partner'], 'Family', 'Child', 'Parents']; }
+const NM1 = () => S.profile.n1 || 'You';
+const NM2 = () => S.profile.n2 || 'Partner';
+function ownerOpts(){ return [['Joint','Joint'], ['Dee', NM1()], ['Wife', NM2()]]; }
+function ownerLabel(v){ return v === 'Dee' ? NM1() : v === 'Wife' ? NM2() : v; }
+function personOpts(){ return [['Dee', NM1()], ['Wife', NM2()], 'Family', 'Child', 'Parents']; }
 
 function ip(list, id, field, val, type, opts){
   const cls = type === 'num' ? 'num' : '';
@@ -512,8 +568,8 @@ function renderDashboard(){
   if (emgMonths < N(S.profile.emgMonths)) alerts.push(['r','Emergency fund is ' + emgMonths.toFixed(1) + ' months of outgo against a target of ' + S.profile.emgMonths + '. Top this up before adding risk assets anywhere else.']);
   else alerts.push(['g','Emergency fund covers ' + emgMonths.toFixed(1) + ' months of household outgo.']);
   const cd = coverNeed('Dee'), cw = coverNeed('Wife');
-  if (cd.gap > 0) alerts.push(['r','Term cover shortfall for ' + esc(S.profile.n1) + ': ' + inr(cd.gap) + '. Indicative need ' + inr(cd.need) + ' against ' + inr(cd.have) + ' in force.']);
-  if (cw.gap > 0) alerts.push(['a','Term cover shortfall for ' + esc(S.profile.n2) + ': ' + inr(cw.gap) + '.']);
+  if (cd.gap > 0) alerts.push(['r','Term cover shortfall for ' + esc(NM1()) + ': ' + inr(cd.gap) + '. Indicative need ' + inr(cd.need) + ' against ' + inr(cd.have) + ' in force.']);
+  if (cw.gap > 0) alerts.push(['a','Term cover shortfall for ' + esc(NM2()) + ': ' + inr(cw.gap) + '.']);
   if (reqSip > t.surplus) alerts.push(['r','Fully funding every goal needs ' + inr(reqSip) + '/month of additional investing against a monthly surplus of ' + inr(t.surplus) + '. Something has to give — push out a target year, trim a goal, or raise income.']);
   else if (reqSip > 0) alerts.push(['a','An extra ' + inr(reqSip) + '/month closes every remaining gap. Your surplus of ' + inr(t.surplus) + ' can absorb it.']);
   else alerts.push(['g','Every goal is on track at current assumptions.']);
@@ -524,6 +580,16 @@ function renderDashboard(){
   document.getElementById('p-dashboard').innerHTML =
   '<h2 class="ttl">Where the plan stands</h2>' +
   '<p class="sub">Everything below is calculated live from the numbers you enter on the other tabs. As of ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' }) + '.</p>' +
+  ((!S.goals.length && !S.income.length && !S.expenses.length && !S.assets.length)
+    ? '<div class="card"><div class="empty"><h4>Nothing here yet</h4>' +
+      '<p>The plan is empty and waiting for your figures. The quickest order is <b>Settings</b> for names and ages, then <b>Cashflow</b> for income and expenses, then <b>Portfolio</b>, and finally <b>Goals</b> — each one feeds the next.</p>' +
+      '<div class="toolbar" style="justify-content:center">' +
+      '<button class="btn pri" onclick="go(\'settings\')">Start with Settings</button>' +
+      '<button class="btn" onclick="go(\'cashflow\')">Go to Cashflow</button>' +
+      '<button class="btn" onclick="loadSample()">Load the worked example</button></div>' +
+      '<p style="margin-top:6px">Every tab carries a collapsed <b>Best practices</b> panel if you want the reasoning behind a section before filling it in.</p>' +
+      '</div></div>'
+    : '') +
   '<div class="grid g4" style="margin-bottom:18px">' +
     kpi('Net worth', inr(t.netWorth), inr(t.assets) + ' assets less ' + inr(t.debt) + ' debt') +
     kpi('Monthly surplus', inr(t.surplus), 'Income ' + inr(t.inc) + ' − outgo ' + inr(t.exp), t.surplus > 0 ? 'good' : 'bad') +
@@ -536,6 +602,7 @@ function renderDashboard(){
     kpi('Extra monthly investing needed', inr(reqSip), 'On top of the ' + inr(t.goalSip) + '/month already committed', reqSip > t.surplus ? 'bad' : reqSip > 0 ? 'warn' : 'good') +
     kpi('Emergency cover', emgMonths.toFixed(1) + ' mo', 'Liquid ' + inr(t.liquid) + ' vs outgo ' + inr(t.exp) + '/mo', emgMonths >= N(S.profile.emgMonths) ? 'good' : 'bad') +
   '</div>' +
+  bp(BP.dashboard) +
   '<div class="card"><h3>What needs attention</h3><p class="hint">Ordered by urgency. These update as you change assumptions.</p>' +
     alerts.map(a => '<div class="alert ' + a[0] + '">' + a[1] + '</div>').join('') + '</div>' +
   '<div class="card"><h3>Goal funding at a glance</h3><p class="hint">Bar length = inflation-adjusted cost. Filled portion = what your existing earmarked corpus plus current SIPs is projected to reach.</p>' +
@@ -624,6 +691,7 @@ function renderGoals(){
   document.getElementById('p-goals').innerHTML =
   '<h2 class="ttl">Life goals</h2>' +
   '<p class="sub">Click any goal to open it. Every field is editable and the maths recalculates instantly. Each goal carries research links so you can check what it actually costs today and update the number — goal costs go stale faster than people expect, particularly education and healthcare.</p>' +
+  bp(BP.goals) +
   '<div class="toolbar"><button class="btn pri" data-add="goals">+ Add a goal</button>' +
     '<span class="tag">' + S.goals.length + ' goals · committed SIPs ' + inr(S.goals.reduce((a,g) => a + N(g.sip), 0)) + '/mo · extra needed ' + inr(reqTotal) + '/mo</span></div>' +
   (cards || '<div class="card"><p class="hint">No goals yet — add one.</p></div>') +
@@ -632,6 +700,64 @@ function renderGoals(){
   '</p></div>';
 }
 function fld(l, inner){ return '<div class="field"><label>' + l + '</label>' + inner + '</div>'; }
+
+/* Collapsible guidance panel. Closed unless the reader asks for it. */
+function bp(points){
+  return '<details class="bp"><summary>Best practices</summary><div class="bpin"><ul>' +
+    points.map(x => '<li><b>' + x[0] + '</b> ' + x[1] + '</li>').join('') +
+    '</ul></div></details>';
+}
+const BP = {
+  dashboard:[
+    ['Read this monthly, not daily.','Nothing here changes meaningfully week to week, and checking often tends to provoke tinkering that costs more than it earns.'],
+    ['Funding percentage beats portfolio return.','A plan that is 90% funded at 9% returns is in better shape than one 60% funded at 13%. Returns are borrowed from the market; savings are yours.'],
+    ['If the required SIP exceeds your surplus, something has to give.','Only three levers exist — save more, extend the target year, or want less. Assuming a higher return is not a fourth lever, it is just moving the problem into the future.'],
+    ['Rank goals honestly.','Marking everything Critical is the same as marking nothing Critical, and it distorts the insurance calculation too.']
+  ],
+  goals:[
+    ['Research the cost before you trust it.','Education and medical costs go stale fastest. Use the links on each goal, then update the figure and stamp the date so you know how old the number is.'],
+    ['Match the horizon, not the mood.','Money needed inside three years belongs in low-duration debt or arbitrage however tempting equity looks. A goal two years out has no time to recover from a drawdown.'],
+    ['Keep one pot per goal where you can.','Shared pots make it impossible to tell whether you are on track, and tempt you into raiding a long-dated goal to fund a near one.'],
+    ['Be careful marking goals Critical.','That flag drives the term-insurance requirement, so over-using it inflates the cover you think you need.'],
+    ['Revisit target years annually.','Goals move. A home purchase pushed out two years changes the required monthly saving far more than most people expect.']
+  ],
+  cashflow:[
+    ['Record actuals, not intentions.','Take a three-month average off your bank and card statements. A budget built on what you meant to spend produces a surplus that never materialises.'],
+    ['Pay yourself first.','Set SIP dates a day or two after income lands. Saving whatever survives the month is how savings rates stay flat for years.'],
+    ['Keep EMIs under roughly 40% of gross income.','Beyond that you lose the flexibility to absorb a job change, a health event, or a rate rise.'],
+    ['Watch lifestyle creep.','Rising income should raise the savings rate, not just the spending. If both grow at the same pace, the goals never get closer.'],
+    ['Give every expense a realistic inflation rate.','School fees and medical costs behave very differently from groceries, and the long-dated maths is sensitive to it.']
+  ],
+  portfolio:[
+    ['Rebalance on bands, not the calendar.','Act when an allocation drifts about five percentage points from target. Rebalancing enforces selling what has run and buying what has lagged, which is exactly what instinct resists.'],
+    ['Do not confuse the wrapper with the asset.','Mutual fund, PMS and AIF are containers, not asset classes. Two products in different wrappers can carry identical risk.'],
+    ['Costs compound the way returns do.','Check expense ratios, and read PMS and AIF fee structures closely — particularly performance fees, hurdle rates and whether the hurdle carries a catch-up.'],
+    ['Mind the property share.','Illiquid real estate much above a third of net worth constrains your ability to fund goals without selling something you would rather keep.'],
+    ['Tag holdings to goals.','It is the only way to know what is genuinely unallocated rather than merely uncounted.'],
+    ['Refresh values quarterly.','More often invites reacting to noise; less often and the plan drifts away from reality.']
+  ],
+  retirement:[
+    ['Plan to ninety, not to seventy-five.','Outliving the corpus is the risk that cannot be undone. Dying with a surplus is a far smaller problem.'],
+    ['Treat a first-year withdrawal above 4–4.5% as a warning.','It signals the corpus is thin relative to the lifestyle. Better to find that out now than at sixty.'],
+    ['Respect sequence risk.','A bad market in the first few years of retirement does disproportionate damage, because you are selling units to live on. De-risk gradually over the five years before you stop working.'],
+    ['Budget healthcare separately.','Medical inflation runs at roughly twice headline CPI, and cover gets harder to buy at precisely the age you need it most.'],
+    ['Leave retirement money alone.','EPF, PPF and NPS exist for one purpose. Raiding them for a car or a wedding is borrowing from a version of yourself who cannot earn.']
+  ],
+  protection:[
+    ['Insurance is protection, not investment.','Pure term cover for risk, mutual funds for growth. Endowment and ULIP products blend the two and tend to do neither well.'],
+    ['Cover to retirement age, not to ninety-nine.','Once the goals are funded and the loans cleared, the cover has done its job and the premium is better invested.'],
+    ['Disclose everything on the proposal form.','Non-disclosure is the leading cause of rejected claims. A slightly higher premium is a trivial price for a policy that actually pays.'],
+    ['Build the emergency fund before investing anything in equity.','Without it, the first setback forces you to sell growth assets at the worst possible moment.'],
+    ['A base floater plus a super top-up is usually cheaper.','It beats buying one very large sum insured outright, for the same overall protection.'],
+    ['Revisit after every life event.','A child, a new loan, a job change or a health diagnosis all change the number.']
+  ],
+  travel:[
+    ['Fund trips inside three years from liquid or arbitrage.','A holiday is a fixed date. Equity cannot be relied on to cooperate with it.'],
+    ['Run a separate standing instruction.','Keeping travel money apart stops it quietly competing with the long-dated goals when the booking window arrives.'],
+    ['Book the volatile components early.','Airfare and peak-season accommodation move most; ground costs are comparatively stable.'],
+    ['Put the trip in the plan rather than on a card.','Financing a holiday at credit-card rates can cost a quarter of the trip again, and lingers long after the tan.']
+  ]
+};
 function row(l, v){ return '<div class="row"><span>' + l + '</span><span>' + v + '</span></div>'; }
 function stamp(id){ const g = S.goals.find(x => x.id === id); if (g){ g.srcDate = new Date().toLocaleDateString('en-IN'); save(); renderAll(); } }
 
@@ -653,6 +779,7 @@ function renderCashflow(){
     kpi('Surplus', inr(t.surplus), (t.inc > 0 ? (t.surplus/t.inc*100).toFixed(0) : 0) + '% savings rate', t.surplus > 0 ? 'good' : 'bad') +
     kpi('Blended expense inflation', wInfl.toFixed(1) + '%', 'Weighted by spend — used as a sanity check') +
   '</div>' +
+  bp(BP.cashflow) +
   '<div class="card"><h3>Income</h3><p class="hint">Gross monthly, before tax where relevant. Add a line for each source.</p>' +
     tbl(['Source','Whose','₹ / month',''], S.income.map(r => [
       ip('income', r.id, 'label', r.label, 'text'),
@@ -709,6 +836,7 @@ function renderPortfolio(){
     kpi('Blended expected return', blended.toFixed(1) + '%', 'Value-weighted across holdings') +
     kpi('Unallocated to goals', inr(t.unallocated), inr(t.earmarked) + ' is earmarked', t.unallocated < 0 ? 'bad' : '') +
   '</div>' +
+  bp(BP.portfolio) +
   '<div class="grid g2">' +
     '<div class="card"><h3>Allocation by asset class</h3>' + donut(items) +
       '<div class="note" style="margin-top:12px">Equity and alternatives are ' + (t.assets ? (eq/t.assets*100).toFixed(0) : 0) + '% of assets; real estate is ' + (t.assets ? (re/t.assets*100).toFixed(0) : 0) + '%. Illiquid property above roughly 30–35% of net worth tends to constrain how flexibly you can fund goals.</div>' +
@@ -766,6 +894,7 @@ function renderRetirement(){
     kpi('Projected corpus', inr(r.proj), r.funded.toFixed(0) + '% of requirement', r.funded >= 100 ? 'good' : r.funded >= 70 ? 'warn' : 'bad') +
     kpi('Extra SIP needed', inr(r.req), r.gap > 0 ? 'Gap of ' + inr(r.gap) : 'Fully funded', r.gap > 0 ? 'warn' : 'good') +
   '</div>' +
+  bp(BP.retirement) +
   '<div class="grid g2">' +
     '<div class="card"><h3>Assumptions</h3><p class="hint">Change any of these and everything on this page recalculates.</p>' +
       '<div class="grid g2">' +
@@ -832,12 +961,13 @@ function renderProtection(){
   '<h2 class="ttl">Protection and emergency fund</h2>' +
   '<p class="sub">The part of a plan that does nothing for years and then does everything. Worth reviewing once a year and after any major life change.</p>' +
   '<div class="grid g4" style="margin-bottom:18px">' +
-    kpi('Emergency fund', emgMonths.toFixed(1) + ' months', 'Target ' + p.emgMonths + ' months = ' + inr(emgTarget), emgMonths >= N(p.emgMonths) ? 'good' : 'bad') +
+    kpi('Emergency fund', emgMonths.toFixed(1) + ' months', 'Target ' + N(p.emgMonths) + ' months = ' + inr(emgTarget), emgMonths >= N(p.emgMonths) ? 'good' : 'bad') +
     kpi('Health cover', inr(health), 'Target ' + inr(p.healthTarget), health >= N(p.healthTarget) ? 'good' : 'warn') +
     kpi('Term cover in force', inr(cd.have + cw.have), 'Combined across both of you') +
     kpi('Annual premiums', inr(prem), (t.inc > 0 ? (prem/(t.inc*12)*100).toFixed(1) : 0) + '% of annual income') +
   '</div>' +
-  '<div class="grid g2">' + block('Dee', p.n1, cd) + block('Wife', p.n2, cw) + '</div>' +
+  bp(BP.protection) +
+  '<div class="grid g2">' + block('Dee', NM1(), cd) + block('Wife', NM2(), cw) + '</div>' +
   '<div class="card"><h3>Emergency fund</h3>' +
     '<div class="grid g3">' +
       fld('Months of cover targeted', op('profile', 'emgMonths', p.emgMonths, 'num')) +
@@ -883,6 +1013,7 @@ function renderTravel(){
     kpi('Already set aside', inr(totSaved), (totFuture ? (totSaved/totFuture*100).toFixed(0) : 0) + '% of the total') +
     kpi('Monthly saving needed', inr(totMonthly), 'Across all planned trips') +
   '</div>' +
+  bp(BP.travel) +
   '<div class="toolbar"><button class="btn pri" data-add="trips">+ Add a trip</button></div>' +
   calcs.sort((a,b) => a.t.year - b.t.year).map(c => {
     const t = c.t;
@@ -954,6 +1085,9 @@ function renderSettings(){
     '<p class="hint">With this switched on the Google Sheet <b>is</b> your database. This page pulls from it when it opens and pushes a couple of seconds after you stop typing. ' +
     (S.profile.n2 || 'Your partner') + ' can work directly in the Sheet from any device, including her phone, and you will see her changes here.</p>' +
     (ONFILE ? '<div class="alert a">You have opened this file straight from your hard drive. Google sign-in cannot run that way — open your Render address instead (something like <code>https://your-planner.onrender.com</code>).</div>' : '') +
+    (CFG_BUILTIN ? '<div class="alert g">Connection details came built into the page, so there was nothing to type. Just sign in below.</div>' : '') +
+    (CLOUD.optOut ? '<div class="alert a">This device has been disconnected from the shared plan. <button class="btn sm" onclick="cloudUseBuiltIn()">Reconnect using the built-in details</button></div>' : '') +
+    (!DEFAULT_SHEET_URL ? '<div class="alert a">No web app URL is built into this file yet, so each device has to be set up by hand. To fix that once and for all, open <code>index.html</code> in GitHub, paste your <code>/exec</code> URL into the <code>DEFAULT_SHEET_URL</code> line near the top, and commit.</div>' : '') +
     '<div class="grid g2">' +
       fld('How you sign in', '<select id="cloudMode" onchange="cloudSaveCfg()">' +
         '<option value="google"' + (isGoogleMode() ? ' selected' : '') + '>Google account (recommended)</option>' +
@@ -988,13 +1122,13 @@ function renderSettings(){
      ['6','Run the <code>testRead</code> function once from the editor and approve the permissions Google asks for. It is your own script, on your own Sheet.'],
      ['7','<b>Deploy → New deployment → Web app.</b> Execute as <i>Me</i>. Who has access: <i>Anyone</i>. Deploy and copy the URL ending in <code>/exec</code>. (<i>Anyone</i> is what lets the browser reach the script at all — the script itself then refuses anyone whose Google account is not in ALLOWED.)'],
      ['8','Back here: paste the URL and the Client ID above, click <b>Sign in with Google</b>, then <b>Test connection</b>, then <b>Pull from Sheet now</b>.'],
-     ['9','Share the Sheet with ' + esc(S.profile.n2 || 'your partner') + ' as an Editor, and send her the Render address. She can use either — this interface in her browser, signing in with her own Google account, or the Sheet directly. Nothing to install on her side.'],
+     ['9','Share the Sheet with ' + esc(NM2()) + ' as an Editor, and send her the Render address. She can use either — this interface in her browser, signing in with her own Google account, or the Sheet directly. Nothing to install on her side.'],
      ['10','Whenever you push a change to the repository, Render redeploys within a minute or two and you both get the new version. No files to copy around.']]
       .map(r => '<tr><td style="font-weight:700;vertical-align:top">' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') +
     '</tbody></table></div>' +
     '<div class="note" style="margin-top:12px"><b>How the security works now.</b> There is no shared password. You sign in with your own Google account; the browser hands the script a token Google signed; the script asks Google to verify it, checks it was issued for your app, and checks the email against its ALLOWED list. To revoke someone, delete their address from that list. Sessions last about an hour and renew silently while you are using the page.</div>' +
-    '<div class="note" style="margin-top:8px"><b>Why it has to be hosted.</b> Google will not issue sign-in tokens to a page opened from your hard drive — it has no verifiable web address. Render gives the page a real HTTPS address, which also means ' + esc(S.profile.n2 || 'your partner') + ' can open this same interface on her phone. The page itself holds none of your figures — they live in the Sheet — so it is safe even though the address is public. Anyone who finds it sees an empty planner and cannot sign in unless their Google account is on the ALLOWED list.</div>' +
-    '<div class="note" style="margin-top:8px"><b>Conflicts.</b> Before every push this page checks whether the Sheet moved since it last looked. If ' + esc(S.profile.n2 || 'your partner') + ' has edited in the meantime it stops and asks you which version to keep. It also checks every thirty seconds and tells you when she has saved something new.</div>' +
+    '<div class="note" style="margin-top:8px"><b>Why it has to be hosted.</b> Google will not issue sign-in tokens to a page opened from your hard drive — it has no verifiable web address. Render gives the page a real HTTPS address, which also means ' + esc(NM2()) + ' can open this same interface on her phone. The page itself holds none of your figures — they live in the Sheet — so it is safe even though the address is public. Anyone who finds it sees an empty planner and cannot sign in unless their Google account is on the ALLOWED list.</div>' +
+    '<div class="note" style="margin-top:8px"><b>Conflicts.</b> Before every push this page checks whether the Sheet moved since it last looked. If ' + esc(NM2()) + ' has edited in the meantime it stops and asks you which version to keep. It also checks every thirty seconds and tells you when she has saved something new.</div>' +
   '</div>' +
   '<div class="card"><h3>Sharing without the Sheet</h3>' +
     '<p class="hint">The plan lives in one JSON file. Keep it in a folder you both sync — OneDrive, Google Drive or Dropbox — and this page reads and writes that file directly. Nothing is sent to any server; your cloud folder does the moving.</p>' +
@@ -1009,11 +1143,13 @@ function renderSettings(){
     '</tbody></table></div>' +
     '<div class="note" style="margin-top:12px">This direct file access works in Chrome and Edge on a computer. Safari and phone browsers cannot write files, so on those use <b>Export</b> and <b>Import</b> instead — or use the Google Sheets version, which both of you can edit at the same time from anything.</div>' +
   '</div>' +
-  '<div class="card"><h3>Backups and reset</h3>' +
+  '<div class="card"><h3>Backups, sample data and reset</h3>' +
     '<div class="toolbar"><button class="btn" onclick="doExport()">Download a backup</button>' +
     '<button class="btn" onclick="document.getElementById(\'importFile\').click()">Restore from a backup</button>' +
-    '<button class="btn danger" onclick="resetAll()">Reset to template</button></div>' +
-    '<div class="note">Even with the shared file, take a dated backup before any major restructuring of the plan. Cloud folders sync deletions as faithfully as they sync edits.</div>' +
+    '<button class="btn" onclick="loadSample()">Load the worked example</button>' +
+    '<button class="btn danger" onclick="resetAll()">Clear everything</button></div>' +
+    '<div class="note"><b>The worked example</b> fills the plan with a realistic Indian household — nine goals, a portfolio across MF, PMS and AIF, insurance and travel — so you can see how the calculations behave before trusting them with your own figures. Load it, look around, then clear it and start properly.</div>' +
+    '<div class="note" style="margin-top:8px">Both buttons overwrite everything, including the Google Sheet if it is connected. Take a dated backup before any major restructuring — cloud storage syncs deletions as faithfully as it syncs edits.</div>' +
   '</div>' +
   '<div class="card"><h3>Suggested review rhythm</h3>' +
     '<div class="tbl-wrap"><table><thead><tr><th>When</th><th>What to check</th></tr></thead><tbody>' +
@@ -1168,6 +1304,13 @@ let CLOUD = { url:'', secret:'', clientId:'', mode:'google' };
 let CSEEN = '', CSAVE_T = null, CBUSY = false, CCONFLICT = false, CSTATE = 'off';
 try { Object.assign(CLOUD, JSON.parse(localStorage.getItem('ffp_cloud') || '{}')); } catch(e){}
 ['url','secret','clientId'].forEach(k => CLOUD[k] = CLOUD[k] || '');
+/* Fall back to the values built into this file, unless this device has
+   deliberately disconnected. Anything typed on the Settings tab wins. */
+let CFG_BUILTIN = false;
+if (!CLOUD.optOut){
+  if (!CLOUD.url && DEFAULT_SHEET_URL){ CLOUD.url = DEFAULT_SHEET_URL; CFG_BUILTIN = true; }
+  if (!CLOUD.clientId && DEFAULT_CLIENT_ID){ CLOUD.clientId = DEFAULT_CLIENT_ID; CFG_BUILTIN = true; }
+}
 CLOUD.mode = CLOUD.mode || 'google';
 const isGoogleMode = () => CLOUD.mode === 'google';
 const cloudOn = () => !!(CLOUD.url && (isGoogleMode() ? CLOUD.clientId : CLOUD.secret));
@@ -1245,15 +1388,24 @@ function cloudSaveCfg(){
   if (s !== null) CLOUD.secret = s;
   if (c !== null) CLOUD.clientId = c;
   if (m) CLOUD.mode = m.value;
+  CLOUD.optOut = false;
   try { localStorage.setItem('ffp_cloud', JSON.stringify(CLOUD)); } catch(e){}
   G_INIT = false;
   CSTATE = cloudOn() ? 'idle' : 'off';
   renderAll();
 }
 function cloudDisconnect(){
-  CLOUD = { url:'', secret:'', clientId:'', mode:'google' };
-  try { localStorage.removeItem('ffp_cloud'); } catch(e){}
+  CLOUD = { url:'', secret:'', clientId:'', mode:'google', optOut:true };
+  CFG_BUILTIN = false;
+  try { localStorage.setItem('ffp_cloud', JSON.stringify(CLOUD)); } catch(e){}
   gSignOut(); CSTATE = 'off'; CSEEN = ''; renderAll();
+}
+/* Undo a disconnect and go back to the values built into the file. */
+function cloudUseBuiltIn(){
+  CLOUD = { url:DEFAULT_SHEET_URL, secret:'', clientId:DEFAULT_CLIENT_ID, mode:'google', optOut:false };
+  CFG_BUILTIN = true;
+  try { localStorage.setItem('ffp_cloud', JSON.stringify(CLOUD)); } catch(e){}
+  G_INIT = false; CSTATE = cloudOn() ? 'idle' : 'off'; renderAll();
 }
 async function cloudCall(payload){
   let auth;
@@ -1348,7 +1500,7 @@ function cloudStatusText(){
 
 /* ============================ BOOT ============================ */
 function renderAll(){
-  document.getElementById('brandSub').textContent = S.profile.n1 + ' & ' + S.profile.n2 + ' · goal-based plan';
+  document.getElementById('brandSub').textContent = (S.profile.n1 && S.profile.n2) ? (S.profile.n1 + ' & ' + S.profile.n2 + ' · goal-based plan') : 'Goal-based planning workspace';
   renderTabs();
   if (TAB === 'dashboard') renderDashboard();
   if (TAB === 'goals') renderGoals();
