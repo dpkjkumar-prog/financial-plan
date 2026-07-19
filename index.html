@@ -262,6 +262,7 @@ function template(){
     income:[], expenses:[], assets:[], liabilities:[],
     goals:[], trips:[], insurance:[],
     retirement:{ monthlyExp:'', infl:6, preRet:11, postRet:8, corpus:'', sip:'', whose:'Dee' },
+    rules:[],
     meta:{}
   };
 }
@@ -792,7 +793,7 @@ function renderCashflow(){
     kpi('Blended expense inflation', wInfl.toFixed(1) + '%', 'Weighted by spend — used as a sanity check') +
   '</div>' +
   bp(BP.cashflow) +
-  (IMP.open && (IMP.target === 'income' || IMP.target === 'expenses') ? renderImporter() : '') +
+  (IMP.open && ['income','expenses','statement'].indexOf(IMP.target) >= 0 ? renderImporter() : '') +
   '<div class="card"><h3>Income</h3><p class="hint">Gross monthly, before tax where relevant. Add a line for each source. ' +
     '<button class="btn sm" onclick="impOpen(\'income\')" style="margin-left:6px">Import</button></p>' +
     tbl(['Source','Whose','₹ / month',''], S.income.map(r => [
@@ -802,7 +803,8 @@ function renderCashflow(){
       delBtn('income', r.id)], ), [null,'120px','150px','90px']) +
     '<button class="btn sm" data-add="income" style="margin-top:10px">+ Add income</button></div>' +
   '<div class="card"><h3>Expenses</h3><p class="hint">Monthly average. The inflation column feeds the retirement and long-horizon calculations — education and medical run far hotter than headline CPI. ' +
-    '<button class="btn sm" onclick="impOpen(\'expenses\')" style="margin-left:6px">Import</button></p>' +
+    '<button class="btn sm" onclick="impOpen(\'statement\')" style="margin-left:6px">Analyse a bank statement</button> ' +
+    '<button class="btn sm" onclick="impOpen(\'expenses\')">Import a summary</button></p>' +
     tbl(['Item','Bucket','₹ / month','Inflation %',''], S.expenses.map(r => [
       ip('expenses', r.id, 'label', r.label, 'text'),
       ip('expenses', r.id, 'cat', r.cat, 'sel', ['Living','Lifestyle','Education','Debt','Protection','Family','Travel','Other']),
@@ -1172,6 +1174,15 @@ function renderSettings(){
     '</tbody></table></div>' +
     '<div class="note" style="margin-top:12px">This direct file access works in Chrome and Edge on a computer. Safari and phone browsers cannot write files, so on those use <b>Export</b> and <b>Import</b> instead — or use the Google Sheets version, which both of you can edit at the same time from anything.</div>' +
   '</div>' +
+  '<div class="card"><h3>Transaction rules ' + ((S.rules || []).length ? '<span class="pill">' + S.rules.length + '</span>' : '') + '</h3>' +
+    '<p class="hint">What you have taught the statement reader. Rules match anywhere in a transaction description, are case-insensitive, and take precedence over the built-in patterns. They travel with the plan, so they apply on ' + esc(NM2()) + '\'s device too.</p>' +
+    ((S.rules || []).length
+      ? tbl(['Matches on','Treat as',''], S.rules.map(r => [
+          ip('rules', r.id, 'match', r.match, 'text'),
+          ip('rules', r.id, 'kind', r.kind, 'sel', RULE_KINDS),
+          delBtn('rules', r.id)]), [null,'220px','90px'])
+      : '<p class="hint" style="margin:0">None yet. They are created from the <b>Analyse a bank statement</b> panel on the Cashflow tab, where anything uncategorised can be assigned in one click.</p>') +
+  '</div>' +
   '<div class="card"><h3>Backups, sample data and reset</h3>' +
     '<div class="toolbar"><button class="btn" onclick="doExport()">Download a backup</button>' +
     '<button class="btn" onclick="document.getElementById(\'importFile\').click()">Restore from a backup</button>' +
@@ -1317,6 +1328,7 @@ function normalise(){
   if (!S.profile) S.profile = t.profile;
   if (!S.retirement) S.retirement = t.retirement;
   if (!S.meta) S.meta = {};
+  if (!Array.isArray(S.rules)) S.rules = [];
   if (S.profile.disc === undefined) S.profile.disc = 8;
   if (S.profile.share === undefined) S.profile.share = 70;
 }
@@ -1534,14 +1546,15 @@ function cloudStatusText(){
 let IMP = { open:false, target:'assets', rows:[], msg:'', busy:false, note:'', owner:'Joint', holder:'' };
 
 const IMP_TARGETS = {
-  assets:     { label:'holdings',  tab:'portfolio' },
+  assets:     { label:'holdings',   tab:'portfolio' },
+  statement:  { label:'a bank statement', tab:'cashflow' },
   insurance:  { label:'policies',  tab:'protection' },
   expenses:   { label:'expenses',  tab:'cashflow' },
   income:     { label:'income',    tab:'cashflow' }
 };
 
-function impOpen(target){ IMP = { open:true, target, rows:[], msg:'', busy:false, note:'', owner:'Joint', holder:'' }; renderAll(); }
-function impClose(){ IMP.open = false; renderAll(); }
+function impOpen(target){ PDFFILE = null; STMT.tx = []; IMP = { open:true, target, rows:[], msg:'', busy:false, note:'', owner:'Joint', holder:'', needPw:false }; renderAll(); }
+function impClose(){ IMP.open = false; PDFFILE = null; IMP.needPw = false; renderAll(); }
 function impSay(kind, text){ IMP.msg = kind ? '<div class="alert ' + kind + '" style="margin:10px 0 0">' + text + '</div>' : ''; renderAll(); }
 
 /* ---- PDF reading (pdf.js, fetched only when first needed) ---- */
@@ -1583,6 +1596,33 @@ async function pdfToLines(file, password){
     });
   }
   return out;
+}
+
+/* Spreadsheet reading — .xls, .xlsx and .csv, loaded on first use. */
+function loadSheetJs(){
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload = () => res(window.XLSX);
+    sc.onerror = () => rej(new Error('Could not load the spreadsheet reader. Check your internet connection.'));
+    document.head.appendChild(sc);
+  });
+}
+async function fileToCells(file){
+  const X = await loadSheetJs();
+  const buf = await file.arrayBuffer();
+  const wb = X.read(buf, { type:'array', cellDates:true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return X.utils.sheet_to_json(ws, { header:1, raw:true, defval:'' });
+}
+function cellDate(v){
+  if (v instanceof Date && !isNaN(v)) return v;
+  if (typeof v === 'number' && v > 20000 && v < 60000) return new Date(Date.UTC(1899,11,30) + v * 86400000);
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return null;
+  const m = stmtDate(s);
+  return m ? m.d : null;
 }
 
 const impMoney = t => { const n = parseFloat(String(t).replace(/[₹,\s]|INR|Rs\.?/gi,'')); return isFinite(n) ? n : 0; };
@@ -1796,44 +1836,73 @@ function parsePasted(text, target){
   return out;
 }
 
-/* ---- Handlers ---- */
-async function impReadPdf(ev){
-  const f = ev.target.files && ev.target.files[0];
-  ev.target.value = '';
-  if (!f) return;
-  const pw = (document.getElementById('impPw') || {}).value || '';
-  IMP.busy = true; impSay('g', 'Reading ' + esc(f.name) + '…');
-  try {
-    const lines = await pdfToLines(f, pw);
-    if (!lines.length) throw new Error('No text found. If this is a scanned document, the figures are an image and cannot be read.');
-    const rows = IMP.target === 'assets' ? parseCAS(lines) : [];
-    const fallback = rows.length ? rows : parsePasted(lines.map(o => o.t).join('\n'), IMP.target);
+/* ---- Handlers ----
+   The file is held until you press Read, so the password can be typed in
+   either order — and a wrong password can be retried without picking the
+   file again. The password is used once, in this browser, and never stored. */
+let PDFFILE = null;
 
-    /* Work out whose statement this is and tag every row with it. */
-    IMP.holder = detectCASHolder(lines);
+function impChooseFile(ev){
+  PDFFILE = (ev.target.files && ev.target.files[0]) || null;
+  ev.target.value = '';
+  if (PDFFILE) impRunPdf();
+}
+function impForget(){ PDFFILE = null; IMP.needPw = false; impSay('', ''); }
+
+async function impRunPdf(){
+  if (!PDFFILE) return impSay('a', 'Choose a PDF first.');
+  const pw = (document.getElementById('impPw') || {}).value || '';
+  impSay('g', 'Reading ' + esc(PDFFILE.name) + '…');
+  try {
+    const lines = await pdfToLines(PDFFILE, pw);
+    IMP.needPw = false;
+
+    if (!lines.length){
+      return impSay('r', '<b>This PDF contains no text — only a picture of one.</b> ' +
+        'It is either a scan, or it was re-saved in a way that flattened it to an image (printing a PDF to PDF often does this). ' +
+        'Nothing can be extracted from it. Use the original file from net banking, or better, download the statement as CSV or Excel and paste it below.');
+    }
+
+    if (IMP.target === 'statement'){
+      STMT.tx = parseStatementRows(lines.map(o => o.t));
+      STMT.drop = {}; STMT.skip = {};
+      if (!STMT.tx.length){
+        return impSay('a', 'Read ' + lines.length + ' lines of text, but no rows looked like transactions — each needs a date and an amount. ' +
+          'This bank\'s layout may differ from what the reader expects; a CSV export will parse reliably.');
+      }
+      return stmtDone(PDFFILE.name);
+    }
+
+    const rows = IMP.target === 'assets' ? parseCAS(lines) : [];
+    const found = rows.length ? rows : parsePasted(lines.map(o => o.t).join('\n'), IMP.target);
+    IMP.holder = IMP.target === 'assets' ? detectCASHolder(lines) : '';
     const guess = ownerFromName(IMP.holder);
     IMP.owner = guess || IMP.owner || 'Joint';
-    fallback.forEach(r => { if (IMP.target === 'assets') r.owner = IMP.owner; else if (IMP.target === 'insurance') r.person = IMP.owner; });
+    found.forEach(r => { if (IMP.target === 'insurance') r.person = IMP.owner; else r.owner = IMP.owner; });
+    IMP.rows = found;
 
-    IMP.rows = fallback;
-    IMP.busy = false;
-    if (!fallback.length){
-      impSay('a', 'Read ' + lines.length + ' lines but recognised no holdings. Try the paste box below, or send me a sample and I will adjust the parser.');
+    if (!found.length){
+      impSay('a', 'Read ' + lines.length + ' lines but recognised no holdings. Try the paste box below.');
     } else {
       const who = IMP.holder
         ? (guess ? 'Held by <b>' + esc(IMP.holder) + '</b> — tagged to ' + esc(ownerLabel(guess)) + '.'
-                 : 'Statement is in the name of <b>' + esc(IMP.holder) + '</b>, which matches neither name on the Settings tab. Choose the owner below.')
-        : 'Could not tell whose statement this is. Choose the owner below.';
-      impSay(guess ? 'g' : 'a', 'Found ' + fallback.length + ' holding(s) in ' + esc(f.name) + '. ' + who + ' Check the rows before importing.');
+                 : 'In the name of <b>' + esc(IMP.holder) + '</b>, which matches neither name on the Settings tab. Choose the owner below.')
+        : '';
+      impSay(guess || !IMP.holder ? 'g' : 'a', 'Found ' + found.length + ' row(s) in ' + esc(PDFFILE.name) + '. ' + who + ' Check them before importing.');
     }
   } catch(e){
-    IMP.busy = false;
-    const msg = /password/i.test(e.message || '')
-      ? 'That PDF is password protected. Enter the password above and choose the file again.'
-      : esc(e.message || String(e));
-    impSay('r', msg);
+    const pwErr = e && (e.name === 'PasswordException' || /password/i.test(e.message || ''));
+    if (pwErr){
+      IMP.needPw = true;
+      impSay('a', '<b>' + esc(PDFFILE.name) + ' is password protected.</b> ' +
+        (pw ? 'That password was not accepted — check it and try again.' : 'Enter the password below and press Unlock and read.') +
+        '<br><span class="tag">Bank statements usually use your customer ID, PAN in capitals, or date of birth as DDMMYYYY. The email that delivered the statement states the format.</span>');
+    } else {
+      impSay('r', esc(e.message || String(e)));
+    }
   }
 }
+
 function impReadPaste(){
   const el = document.getElementById('impText');
   const txt = el ? el.value : '';
@@ -1872,6 +1941,378 @@ function impCommit(){
   banner('info', n + ' ' + what + ' imported. Check the figures and adjust anything the reader got wrong.');
 }
 
+
+/* ============================================================================
+   BANK STATEMENT ANALYSIS
+   Reads transactions, works out what they were, and turns several months of
+   them into monthly averages. The three things that quietly ruin this — money
+   moved between your own accounts, credit-card bill payments, and investment
+   debits — are detected and excluded by default, because none of them is
+   spending. Nothing is written until you have seen the breakdown.
+   ========================================================================== */
+let STMT = { tx:[], months:1, from:null, to:null, msg:'', skip:{}, drop:{}, replace:true };
+
+const AMT_RE = /\b\d[\d,]*\.\d{2}\b/g;
+const MONTHS3 = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+
+function stmtDate(t){
+  let m = t.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
+  if (m){
+    let [_, a, b, y] = m; a = +a; b = +b; y = +y; if (y < 100) y += 2000;
+    if (a > 31) return null;
+    const d = new Date(y, (b > 12 ? a : b) - 1, (b > 12 ? b : a));   // day-first, as Indian banks print
+    return isNaN(d) ? null : { d, end: m.index + m[0].length };
+  }
+  m = t.match(/\b(\d{1,2})[\-\s]([A-Za-z]{3})[a-z]*[\-\s,]?\s?(\d{2,4})\b/);
+  if (m && MONTHS3[m[2].toLowerCase()] !== undefined){
+    let y = +m[3]; if (y < 100) y += 2000;
+    const d = new Date(y, MONTHS3[m[2].toLowerCase()], +m[1]);
+    return isNaN(d) ? null : { d, end: m.index + m[0].length };
+  }
+  m = t.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (m){ const d = new Date(+m[1], +m[2]-1, +m[3]); return isNaN(d) ? null : { d, end: m.index + m[0].length }; }
+  return null;
+}
+
+/* ---- what kind of transaction is this? ---- */
+const STMT_RULES = [
+  /* Order matters — the first rule that matches wins. */
+
+  /* Money moving to or from your own investments. Never spending, and a
+     redemption arriving is not income either. */
+  { k:'investment', re:/\bsip\b|mutual\s?fund|mutualfund|\bmf\b|redemption|\bred\b\s|sbired|kmmf|nextbillion|groww|zerodha|kuvera|smallcase|upstox|indmoney|paytm money|etmoney|coin\b|\bnps\b|\bppf\b|\bnsdl\b|\bcdsl\b|sovereign gold|recurring deposit|\bsecurities\b|broking|demat/i },
+
+  /* Credit-card bills. "ON CRED" is settling a card; "VIA CRED" is a purchase
+     made through the app, which is real spending, so it must not match here. */
+  { k:'card',       re:/\bon cred\b|cred\.club|credit card (payment|bill)|card payment|autopay si|si-tad|^cc\s?\d|\bcc\b.*autopay|amex payment|billdesk.*card/i },
+
+  /* Between your own accounts, or between the two of you. */
+  { k:'transfer',   re:/ib funds transfer|\bself\b|own account|to own|transfer to sav|trf to self|\bsweep\b|internal transfer|acct? transfer/i },
+
+  /* Money coming in. */
+  { k:'income',     re:/\bsalary\b|salary credit|\bstipend\b|\bpension\b|dividend|interest paid|int\.?\s?cr\b|interest credit|\bcms\b|(neft|rtgs|imps)\s?cr\b|inward remit|refund/i },
+
+  { k:'Debt',       re:/\bemi\b|\bloan\b|home loan|car loan|auto loan|\bach[-\s]?d\b|mortgage|repayment|idfcfirstb/i },
+  { k:'Protection', re:/insur|premium|\blic\b|life insurance|health insurance|star health|policybazaar|hdfc life|icici pru life|max life|term plan|mediclaim/i },
+  { k:'Education',  re:/school|tuition|college|university|academy|byju|unacademy|vedantu|coaching|exam fee|hostel/i },
+  { k:'Travel',     re:/makemytrip|goibibo|cleartrip|irctc|indigo|air india|vistara|akasa|spicejet|yatra|booking\.com|airbnb|oyo\b|hotel|resort|\bvisa fee\b/i },
+  { k:'Living',     re:/bigbasket|dmart|d-mart|instamart|blinkit|zepto|grocer|super ?market|reliance fresh|more retail|milk|kirana|bescom|electricity|water bill|\bgas\b|indane|broadband|act fibernet|airtel|\bjio\b|vodafone|\bbsnl\b|bharat connect|bbps|maintenance|society|maid|cook|driver|apollo|pharmeasy|netmeds|\b1mg\b|hospital|clinic|practo|diagnostic|medical|chemist|pharmacy|petrol|fuel|hpcl|iocl|bharat petroleum/i },
+  { k:'Lifestyle',  re:/swiggy|zomato|dominos|pizza|restaurant|cafe|starbucks|barista|amazon|flipkart|myntra|ajio|nykaa|tata cliq|meesho|bookmyshow|pvr|inox|netflix|spotify|hotstar|prime video|sony liv|zee5|apple|icloud|google\s?(one|storage)|youtube|gym|fitness|cult\.?fit|salon|spa|uber|\bola\b|rapido|\bcab\b|liquor|wine|decathlon|croma|reliance digital/i },
+  { k:'Family',     re:/parents|mother|father|\bmom\b|\bdad\b|maintenance to family|gift to/i },
+
+  /* Tax and bank charges. */
+  { k:'Other',      re:/\bcgst\b|\bsgst\b|\bigst\b|\btds\b|service charge|bank charge|\bamc\b fee|annual fee/i }
+];
+function classifyTx(narr){
+  const t = ' ' + (narr || '') + ' ';
+  const lower = t.toLowerCase();
+  /* Anything you have taught it wins over the built-in patterns. */
+  for (const r of (S.rules || [])){
+    if (r.match && lower.indexOf(String(r.match).toLowerCase()) >= 0) return r.kind;
+  }
+  for (const r of STMT_RULES) if (r.re.test(t)) return r.k;
+  return 'Other';
+}
+
+/* Suggest the distinctive part of a narration to match on — the bit that
+   identifies the payee rather than the reference numbers around it. */
+const RULE_NOISE = /^(upi|imps|neft|rtgs|ach|from|phone|payment|paytm|via|using|to|the|and|dr|cr|inb|ib|funds|transfer|bank|ltd|pvt|india|limited|account|ac|no|ref|txn)$/i;
+function ruleSuggest(narr){
+  const toks = String(narr || '').split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const good = toks.filter(t => t.length >= 3 && !RULE_NOISE.test(t) && !/^\d+$/.test(t) && !/^X+\d*$/i.test(t));
+  if (!good.length) return (toks[0] || '').slice(0, 14);
+  /* A payee's name beats a reference number, however long the number is. */
+  const score = t => (/^[A-Za-z]+$/.test(t) ? 100 : 0) + Math.min(t.length, 20);
+  return good.sort((a,b) => score(b) - score(a))[0].slice(0, 20);
+}
+function stmtReclassify(){ STMT.tx.forEach(t => { t.kind = classifyTx(t.narr); }); }
+
+function ruleSet(match, kind){
+  match = String(match || '').trim();
+  if (!match) return;
+  S.rules = S.rules || [];
+  const i = S.rules.findIndex(r => String(r.match).toLowerCase() === match.toLowerCase());
+  if (kind === '__none'){ if (i >= 0) S.rules.splice(i, 1); }
+  else if (i >= 0) S.rules[i].kind = kind;
+  else S.rules.push({ id:uid(), match, kind });
+  stmtReclassify(); save(); renderAll();
+}
+function ruleDelete(id){ S.rules = (S.rules || []).filter(r => r.id !== id); stmtReclassify(); save(); renderAll(); }
+const RULE_KINDS = [['Living','Living'],['Lifestyle','Lifestyle'],['Education','Education'],['Debt','Debt'],
+  ['Protection','Protection'],['Family','Family'],['Travel','Travel'],['Other','Other (leave uncategorised)'],
+  ['income','Treat as income'],['transfer','Exclude — own transfer'],['investment','Exclude — investment'],['card','Exclude — card bill']];
+const STMT_EXCLUDE = { transfer:'Transfers between your own accounts', investment:'Investments and SIPs', card:'Credit card bill payments' };
+
+/* ---- parsing ---- */
+function parseStatementRows(rows){
+  /* rows: array of strings, one per printed line or spreadsheet row */
+  const tx = [];
+  let prevBal = null;
+  rows.forEach(raw => {
+    const t = String(raw).replace(/\s+/g,' ').trim();
+    if (!t || t.length < 8) return;
+    if (/^(date|txn date|value date|particulars|description|narration|opening balance|closing balance|statement of|account (no|number|statement)|page \d)/i.test(t)) return;
+    const dt = stmtDate(t);
+    if (!dt) return;
+    const after = t.slice(dt.end);
+    const amts = after.match(AMT_RE);
+    if (!amts || !amts.length) return;
+
+    const firstAmtAt = after.indexOf(amts[0]);
+    let narr = after.slice(0, firstAmtAt).replace(/^[\s,|;:\-]+|[\s,|;:\-]+$/g,'').trim();
+    if (narr.length < 3) narr = after.replace(AMT_RE,' ').replace(/\s{2,}/g,' ').trim();
+
+    let amount = 0, bal = null, dir = 0;   // dir: -1 spent, +1 received
+    const v = amts.map(impMoney);
+    const drcr = after.match(/\b(dr|cr|debit|credit|withdrawal|deposit)\b/i);
+
+    if (v.length >= 2){ bal = v[v.length - 1]; amount = v[v.length - 2]; }
+    else { amount = v[0]; }
+
+    if (bal !== null && prevBal !== null){
+      dir = bal < prevBal ? -1 : (bal > prevBal ? 1 : 0);
+    }
+    if (!dir && drcr){
+      dir = /cr|credit|deposit/i.test(drcr[1]) ? 1 : -1;
+    }
+    if (!dir) dir = -1;                    // statements are mostly spending
+    if (bal !== null) prevBal = bal;
+    if (!(amount > 0)) return;
+    tx.push({ d: dt.d, narr, amount, dir, kind: classifyTx(narr) });
+  });
+  return tx;
+}
+
+/* Rows of cells — from a spreadsheet file or a pasted table. Finds the
+   header wherever it sits (bank exports bury it under a dozen title rows)
+   and maps the columns properly rather than guessing by position. */
+function parseStatementCells(rows){
+  let hi = -1, map = null;
+  for (let i = 0; i < Math.min(rows.length, 80); i++){
+    const cells = (rows[i] || []).map(c => String(c == null ? '' : c).toLowerCase().trim());
+    const f = re => cells.findIndex(c => re.test(c));
+    const iDate = f(/^date$|txn date|transaction date|^date /);
+    const iNarr = f(/narration|description|particular|remarks|details/);
+    const iDeb  = f(/withdraw|debit/);
+    const iCr   = f(/deposit|credit/);
+    const iAmt  = f(/^amount|^amt/);
+    const iBal  = f(/balance/);
+    if (iDate >= 0 && iNarr >= 0 && (iDeb >= 0 || iCr >= 0 || iAmt >= 0)){
+      hi = i; map = { iDate, iNarr, iDeb, iCr, iAmt, iBal }; break;
+    }
+  }
+  if (hi < 0) return null;
+
+  const tx = [];
+  for (let i = hi + 1; i < rows.length; i++){
+    const c = rows[i] || [];
+    const d = cellDate(c[map.iDate]);
+    if (!d) continue;
+    const narr = String(c[map.iNarr] == null ? '' : c[map.iNarr]).replace(/\s+/g,' ').trim();
+    const deb = map.iDeb >= 0 ? impMoney(c[map.iDeb]) : 0;
+    const cr  = map.iCr  >= 0 ? impMoney(c[map.iCr])  : 0;
+    let amount = 0, dir = -1;
+    if (deb > 0){ amount = deb; dir = -1; }
+    else if (cr > 0){ amount = cr; dir = 1; }
+    else if (map.iAmt >= 0){ const a = impMoney(c[map.iAmt]); amount = Math.abs(a); dir = a < 0 ? -1 : 1; }
+    if (!(amount > 0)) continue;
+    tx.push({ d, narr, amount, dir, kind: classifyTx(narr) });
+  }
+  return tx.length ? tx : null;
+}
+
+/* Spreadsheet paste with a header row — map the columns properly. */
+function parseStatementTable(text){
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return null;
+  const split = l => l.indexOf('\t') >= 0 ? l.split('\t') : l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+  const viaCells = parseStatementCells(lines.map(l => split(l).map(x => x.replace(/"/g,'').trim())));
+  if (viaCells) return viaCells;
+  const head = split(lines[0]).map(h => h.replace(/"/g,'').trim().toLowerCase());
+  const find = re => head.findIndex(h => re.test(h));
+  const iDate = find(/date/), iNarr = find(/narration|particular|description|details|remarks|transaction/),
+        iDeb = find(/debit|withdraw|dr\b/), iCr = find(/credit|deposit|cr\b/),
+        iAmt = find(/^amount|amt/), iBal = find(/balance/);
+  if (iDate < 0 || (iNarr < 0 && iAmt < 0 && iDeb < 0)) return null;
+
+  const tx = [];
+  lines.slice(1).forEach(l => {
+    const c = split(l).map(x => x.replace(/"/g,'').trim());
+    if (c.length < 2) return;
+    const dt = stmtDate(c[iDate] || '');
+    if (!dt) return;
+    const narr = (iNarr >= 0 ? c[iNarr] : '') || '';
+    let amount = 0, dir = -1;
+    const deb = iDeb >= 0 ? impMoney(c[iDeb]) : 0;
+    const cr  = iCr  >= 0 ? impMoney(c[iCr])  : 0;
+    if (deb > 0){ amount = deb; dir = -1; }
+    else if (cr > 0){ amount = cr; dir = 1; }
+    else if (iAmt >= 0){
+      const a = impMoney(c[iAmt]);
+      amount = Math.abs(a);
+      dir = a < 0 ? -1 : (/cr|credit|deposit/i.test(l) ? 1 : -1);
+    }
+    if (!(amount > 0)) return;
+    tx.push({ d: dt.d, narr, amount, dir, kind: classifyTx(narr) });
+  });
+  return tx.length ? tx : null;
+}
+
+/* ---- summarising ---- */
+function stmtSummarise(){
+  const tx = STMT.tx;
+  if (!tx.length) return { cats:{}, inc:0, months:1 };
+  const ds = tx.map(t => t.d.getTime());
+  STMT.from = new Date(Math.min.apply(null, ds));
+  STMT.to   = new Date(Math.max.apply(null, ds));
+  const days = (STMT.to - STMT.from) / 86400000;
+  STMT.months = Math.max(1, Math.round((days / 30.44) * 10) / 10);
+
+  const cats = {}, excl = {};
+  let inc = 0;
+  tx.forEach((t, i) => {
+    if (STMT.drop[i]) return;
+    if (t.kind === 'income'){ if (t.dir > 0) inc += t.amount; return; }
+    if (STMT_EXCLUDE[t.kind]){ (excl[t.kind] = excl[t.kind] || { n:0, sum:0 }); excl[t.kind].n++; excl[t.kind].sum += t.amount; return; }
+    if (t.dir > 0) return;                       // other credits are not spending
+    const c = cats[t.kind] = cats[t.kind] || { n:0, sum:0, biggest:0, biggestNarr:'' };
+    c.n++; c.sum += t.amount;
+    if (t.amount > c.biggest){ c.biggest = t.amount; c.biggestNarr = t.narr; }
+  });
+  return { cats, excl, inc, months: STMT.months };
+}
+
+
+/* ---- statement handlers and review panel ---- */
+function stmtReadPaste(){
+  const el = document.getElementById('impText'); const txt = el ? el.value : '';
+  if (!txt.trim()) return impSay('a', 'Paste the statement first.');
+  STMT.tx = parseStatementTable(txt) || parseStatementRows(txt.split(/\r?\n/));
+  STMT.drop = {}; STMT.skip = {};
+  stmtDone('the pasted text');
+}
+function stmtDone(src){
+  if (!STMT.tx.length) return impSay('a', 'No transactions recognised in ' + esc(src) + '. Each row needs a date and an amount with two decimals. A CSV export from net banking parses most reliably.');
+  const s = stmtSummarise();
+  impSay('g', 'Read <b>' + STMT.tx.length + '</b> transactions from ' + esc(src) + ', covering <b>' +
+    STMT.from.toLocaleDateString('en-IN', {day:'numeric', month:'short'}) + ' to ' +
+    STMT.to.toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'}) + '</b> — about ' + s.months + ' month(s).');
+}
+function stmtSkip(k){ STMT.skip[k] = !STMT.skip[k]; renderAll(); }
+function stmtDropTx(i){ STMT.drop[i] = !STMT.drop[i]; renderAll(); }
+function stmtSetRepl(v){ STMT.replace = v; renderAll(); }
+
+function stmtCommit(){
+  const s = stmtSummarise();
+  const keep = Object.keys(s.cats).filter(k => !STMT.skip[k]);
+  if (!keep.length) return impSay('a', 'Every category is excluded.');
+  if (STMT.replace) S.expenses = S.expenses.filter(e => !/from statement/i.test(e.label || ''));
+  const tag = ' (from statement, ' + s.months + '-month average)';
+  keep.forEach(k => {
+    S.expenses.push({ id:uid(), label:k + tag, cat:k, monthly: Math.round(s.cats[k].sum / s.months), infl:N(S.profile.genInfl) || 6 });
+  });
+  if (s.inc > 0 && !STMT.skip.__inc){
+    if (STMT.replace) S.income = S.income.filter(e => !/from statement/i.test(e.label || ''));
+    S.income.push({ id:uid(), label:'Credits identified as income' + tag, owner:IMP.owner || 'Joint', monthly: Math.round(s.inc / s.months) });
+  }
+  IMP.open = false; STMT.tx = [];
+  save(); renderAll();
+  banner('info', keep.length + ' expense categories imported as monthly averages. Check them on the Cashflow tab — anything the reader mis-filed is editable there.');
+}
+
+function renderStatement(){
+  const s = stmtSummarise();
+  const cats = Object.keys(s.cats).sort((a,b) => s.cats[b].sum - s.cats[a].sum);
+  const totalMo = cats.filter(k => !STMT.skip[k]).reduce((a,k) => a + s.cats[k].sum / s.months, 0);
+
+  const rows = cats.map(k => {
+    const c = s.cats[k], mo = c.sum / s.months;
+    return '<tr' + (STMT.skip[k] ? ' style="opacity:.45"' : '') + '>' +
+      '<td><input type="checkbox"' + (STMT.skip[k] ? '' : ' checked') + ' onchange="stmtSkip(\'' + k + '\')" style="width:auto"></td>' +
+      '<td><b>' + esc(k) + '</b></td><td class="num">' + c.n + '</td>' +
+      '<td class="num">' + inr(c.sum) + '</td><td class="num"><b>' + inr(mo) + '</b></td>' +
+      '<td style="color:var(--muted);font-size:12px">' + esc((c.biggestNarr || '').slice(0,42)) + ' · ' + inr(c.biggest) + '</td></tr>';
+  }).join('');
+
+  /* Large items distort a monthly average — but only if they were one-offs.
+     An EMI of the same amount every month is large and entirely expected, so
+     anything that repeats is left alone. */
+  const seen = {};
+  const keyOf = t => (t.narr || '').toLowerCase().replace(/[^a-z]/g,'').slice(0,18) + '|' + Math.round(t.amount);
+  STMT.tx.forEach(t => { const k = keyOf(t); seen[k] = (seen[k] || 0) + 1; });
+  const big = STMT.tx.map((t,i) => ({ t, i }))
+    .filter(o => o.t.dir < 0 && !STMT_EXCLUDE[o.t.kind] && o.t.kind !== 'income'
+                 && o.t.amount > (totalMo * 0.25) && seen[keyOf(o.t)] < 2)
+    .sort((a,b) => b.t.amount - a.t.amount).slice(0, 8);
+
+  /* Uncategorised transactions, grouped by payee, each assignable in one go. */
+  const groups = {};
+  STMT.tx.forEach((t, i) => {
+    if (t.kind !== 'Other' || STMT.drop[i]) return;
+    const g = ruleSuggest(t.narr);
+    (groups[g] = groups[g] || { n:0, sum:0, sample:t.narr, dir:t.dir });
+    groups[g].n++; groups[g].sum += t.amount;
+  });
+  const gKeys = Object.keys(groups).sort((a,b) => groups[b].sum - groups[a].sum).slice(0, 14);
+  const teach = gKeys.length
+    ? '<div class="note" style="margin-top:12px"><b>Teach it what these are.</b> These did not match any pattern. Set a category and it is remembered — the same payee classifies itself next time, on any device. Nothing here is guessed on your behalf.' +
+      '<div class="tbl-wrap" style="margin-top:8px"><table><thead><tr><th>Matches on</th><th>Example</th><th class="num">Txns</th><th class="num">Total</th><th style="width:190px">Treat as</th></tr></thead><tbody>' +
+      gKeys.map(g =>
+        '<tr><td><input type="text" value="' + esc(g) + '" id="rul_' + esc(g).replace(/[^A-Za-z0-9]/g,'') + '" style="font-size:12px"></td>' +
+        '<td style="color:var(--muted);font-size:12px">' + esc(String(groups[g].sample).replace(/\d{6,}/g,'#').slice(0,40)) + (groups[g].dir > 0 ? ' <b>(credit)</b>' : '') + '</td>' +
+        '<td class="num">' + groups[g].n + '</td><td class="num">' + inr(groups[g].sum) + '</td>' +
+        '<td><select onchange="ruleSet(document.getElementById(\'rul_' + esc(g).replace(/[^A-Za-z0-9]/g,'') + '\').value, this.value)">' +
+          '<option value="">— choose —</option>' + optHtml(RULE_KINDS, '') + '</select></td></tr>').join('') +
+      '</tbody></table></div></div>'
+    : '';
+
+  const exRows = Object.keys(s.excl || {}).map(k =>
+    '<tr><td>' + esc(STMT_EXCLUDE[k]) + '</td><td class="num">' + s.excl[k].n + '</td><td class="num">' + inr(s.excl[k].sum) + '</td></tr>').join('');
+
+  return '<div style="margin-top:14px">' +
+    '<div class="grid g4" style="margin-bottom:12px">' +
+      kpi('Transactions', String(STMT.tx.length), 'Over ' + s.months + ' month(s)') +
+      kpi('Spending a month', inr(totalMo), 'Across ' + cats.filter(k => !STMT.skip[k]).length + ' categories') +
+      kpi('Income spotted', inr(s.inc / s.months) + '/mo', s.inc > 0 ? 'Salary and similar credits' : 'None identified') +
+      kpi('Excluded', inr(Object.keys(s.excl || {}).reduce((a,k) => a + s.excl[k].sum, 0)), 'Transfers, cards, investments') +
+    '</div>' +
+    tbl(['Use','Category','Txns','Total','Per month','Largest single item'], []).replace('<tbody></tbody>', '<tbody>' + rows + '</tbody>') +
+    (exRows ? '<div class="note" style="margin-top:12px"><b>Left out, correctly.</b> These are not spending — money moved between your own accounts, credit-card bills already counted as the underlying purchases, and investments which are saving.' +
+      '<div class="tbl-wrap" style="margin-top:8px"><table><tbody>' + exRows + '</tbody></table></div></div>' : '') +
+    (big.length ? '<div class="note" style="margin-top:10px"><b>Large one-off items.</b> Each of these is over a quarter of your monthly spend, so leaving them in inflates the average. Untick anything that was a one-off rather than a habit.' +
+      '<div class="tbl-wrap" style="margin-top:8px"><table><tbody>' + big.map(o =>
+        '<tr><td style="width:36px"><input type="checkbox"' + (STMT.drop[o.i] ? '' : ' checked') + ' onchange="stmtDropTx(' + o.i + ')" style="width:auto"></td>' +
+        '<td>' + esc(o.t.narr.slice(0,54)) + '</td><td style="color:var(--muted)">' + esc(o.t.kind) + '</td>' +
+        '<td class="num">' + inr(o.t.amount) + '</td><td style="color:var(--muted);font-size:12px">' + o.t.d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}) + '</td></tr>').join('') +
+      '</tbody></table></div></div>' : '') +
+    teach +
+    '<div class="toolbar" style="margin-top:12px">' +
+      '<button class="btn pri" onclick="stmtCommit()">Import as monthly expenses</button>' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox"' + (STMT.replace ? ' checked' : '') +
+        ' onchange="stmtSetRepl(this.checked)" style="width:auto"> Replace lines from a previous statement import</label>' +
+    '</div>' +
+  '</div>';
+}
+
+/* A file chooser with its password, usable in either order. */
+function pdfPicker(label){
+  return '<div class="card" style="background:#F7F9FC;padding:14px;margin:0 0 14px">' +
+    '<div class="grid g2">' +
+      fld(label, '<input type="file" accept="application/pdf" onchange="impChooseFile(event)">') +
+      fld('Password' + (IMP.needPw ? ' — required for this file' : ' (only if the PDF asks for one)'),
+          '<input id="impPw" type="password" placeholder="leave blank if not protected" ' +
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();impRunPdf();}">') +
+    '</div>' +
+    (PDFFILE
+      ? '<div class="toolbar" style="margin:2px 0 0">' +
+          '<button class="btn ' + (IMP.needPw ? 'pri' : '') + '" onclick="impRunPdf()">' + (IMP.needPw ? 'Unlock and read' : 'Read again') + '</button>' +
+          '<span class="tag">' + esc(PDFFILE.name) + '</span>' +
+          '<button class="btn sm" onclick="impForget()">Clear</button>' +
+        '</div>'
+      : '<p class="hint" style="margin:0">The file is read inside this browser. Neither it nor the password is uploaded or stored anywhere.</p>') +
+  '</div>';
+}
+
 /* ---- The importer panel ---- */
 function renderImporter(){
   if (!IMP.open) return '';
@@ -1899,20 +2340,31 @@ function renderImporter(){
       '</td><td><input class="num" type="number" step="any" value="' + N(r.value) + '" data-imp="' + i + '" data-f="value"></td></tr>';
   }).join('');
 
+  if (t === 'statement'){
+    return '<div class="card" style="border-color:#C79A3A">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+        '<h3 style="margin:0;flex:1">Work out your spending from a bank statement</h3>' +
+        '<button class="btn sm" onclick="impClose()">Close</button></div>' +
+      '<p class="hint">Read inside this browser; the file is never uploaded. Transfers between your own accounts, credit-card bill payments and investment debits are identified and left out — none of them is spending.</p>' +
+      pdfPicker('Statement as a PDF') +
+      fld('Or paste it — a CSV/Excel export from net banking parses most reliably',
+          '<textarea id="impText" rows="5" placeholder="Date\tNarration\tDebit\tCredit\tBalance&#10;01/04/2026\tUPI-SWIGGY\t845.00\t\t2,45,300.00"></textarea>') +
+      '<div class="toolbar"><button class="btn" onclick="stmtReadPaste()">Read the pasted statement</button></div>' +
+      IMP.msg +
+      (STMT.tx.length ? renderStatement() : '') +
+      '<div class="note" style="margin-top:12px">Three months or more gives a fairer average than one. Categories are guessed from the narration — check them, and correct anything odd on the Cashflow tab afterwards.</div>' +
+    '</div>';
+  }
+
   return '<div class="card" style="border-color:#C79A3A">' +
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
       '<h3 style="margin:0;flex:1">Import ' + IMP_TARGETS[t].label + ' from a document</h3>' +
       '<button class="btn sm" onclick="impClose()">Close</button></div>' +
     '<p class="hint">Everything is read inside this browser. The file is never uploaded, and nothing joins your plan until you press Import at the bottom.</p>' +
     (isAssets
-      ? '<div class="grid g2">' +
-          fld('1. Consolidated account statement (CAS) as a PDF',
-              '<input type="file" accept="application/pdf" onchange="impReadPdf(event)">') +
-          fld('PDF password, if it has one', '<input id="impPw" type="password" placeholder="usually your PAN in capitals">') +
-        '</div>' +
+      ? pdfPicker('1. Consolidated account statement (CAS) as a PDF') +
         '<p class="hint" style="margin:-4px 0 12px">Request a CAS from <a href="https://www.camsonline.com/Investors/Statements/Consolidated-Account-Statement" target="_blank" rel="noopener">CAMS</a> or <a href="https://mfs.kfintech.com/investor/General/ConsolidatedAccountStatement" target="_blank" rel="noopener">KFintech</a> — it arrives by email covering every fund house.</p>'
-      : '<div class="grid g2">' + fld('Read a PDF', '<input type="file" accept="application/pdf" onchange="impReadPdf(event)">') +
-        fld('PDF password, if it has one', '<input id="impPw" type="password">') + '</div>') +
+      : pdfPicker('Read a PDF')) +
     (IMP.rows.length
       ? '<div class="grid g2" style="margin-top:4px">' +
           fld('Whose ' + (isIns ? 'policies' : 'holdings') + ' are these?',
