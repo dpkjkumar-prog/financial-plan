@@ -1,0 +1,38 @@
+# Render blueprint for the Family Financial Planner.
+#
+# Put this file next to Family-Financial-Planner.html in a Git repository,
+# push it to GitHub, then in the Render dashboard choose New -> Blueprint
+# (or New -> Static Site and point it at the repo).
+#
+# Render serves this as a free static site with HTTPS. Static sites do not
+# sleep the way free web services do, so the address is always live.
+#
+# The page contains none of your financial data — that lives in the Google
+# Sheet, behind Google sign-in — so this repository can be private or public.
+
+services:
+  - type: web
+    name: family-financial-planner
+    runtime: static
+    buildCommand: ""
+    staticPublishPath: .
+    pullRequestPreviewsEnabled: false
+
+    # Serve the planner at the root of the site, so the address you register
+    # as an authorised JavaScript origin is simply https://<name>.onrender.com
+    routes:
+      - type: rewrite
+        source: /
+        destination: /Family-Financial-Planner.html
+
+    headers:
+      # Stop the page being embedded in someone else's site.
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
