@@ -345,9 +345,10 @@ function save(){
   S.meta = S.meta || {};
   S.meta.by = ME || 'someone';
   S.meta.at = new Date().toISOString();
-  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){}
-  if (cloudOn()) scheduleCloudSave();   // Sheet is the master when it is connected
-  else scheduleFileSave();
+  /* With the Sheet as the back end nothing is written to this device — no cached
+     copy of the plan exists for anyone to open without signing in. */
+  if (cloudOn()){ scheduleCloudSave(); }
+  else { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){} scheduleFileSave(); }
   flagStatus();
 }
 function load(){
@@ -355,6 +356,13 @@ function load(){
   return null;
 }
 function flag(t){ const el = document.getElementById('saveflag'); if (el) el.textContent = t; }
+
+/* Remove every trace of the plan from this device and from memory. The saved
+   connection details and your name are kept — neither reveals anything. */
+function wipeLocal(){
+  try { localStorage.removeItem(KEY); } catch(e){}
+  S = template(); normalise();
+}
 
 function doExport(){
   const blob = new Blob([JSON.stringify(S, null, 2)], { type:'application/json' });
@@ -1378,8 +1386,9 @@ function gSignIn(){
 }
 function gSignOut(){
   GTOKEN = ''; GEXP = 0; GEMAIL = ''; GNAME = '';
-  GATE_OFF = false; CSEEN = '';
+  CSEEN = '';
   try { google.accounts.id.disableAutoSelect(); } catch(e){}
+  wipeLocal();          // leave nothing behind on this device
   renderAll();
 }
 function gRenderButton(){
@@ -1465,8 +1474,7 @@ async function cloudPull(silent){
   try {
     const j = await cloudCall({ action:'read' });
     if (j.data){ S = j.data; normalise(); CSEEN = (j.meta && j.meta.at) || ''; CCONFLICT = false;
-      try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){}
-      CSTATE = 'idle'; banner(''); renderAll(); }
+      CSTATE = 'idle'; banner(''); renderAll(); }   /* held in memory only */
   } catch(e){ CSTATE = 'error'; if (!silent) banner('err', 'Could not read from the Sheet: ' + esc(e.message)); }
   CBUSY = false; flagStatus();
 }
@@ -1536,20 +1544,17 @@ function renderGate(){
       '</ul>' +
       '<div class="toolbar" style="margin:12px 0 0">' +
         '<button class="btn sm" onclick="cloudTest()">Test the connection</button>' +
-        '<button class="btn sm" onclick="gateBypass()">Open without signing in</button>' +
       '</div>' +
-      '<p style="margin:10px 0 0;font-size:12px">Opening without signing in gives you an empty planner on this device only — nothing loads from the Sheet and nothing saves back to it. It is there so a configuration problem cannot lock you out entirely.</p>' +
+      '<p style="margin:10px 0 0;font-size:12px">There is no way past this screen without an approved Google account. If the connection itself is broken, it is fixed in the Apps Script or in <code>index.html</code> — never from here. Your figures always remain reachable directly in the Google Sheet.</p>' +
     '</div></details>' +
   '</div>';
   flagStatus();
   setTimeout(gRenderButton, 0);
 }
-let GATE_OFF = false;
-function gateBypass(){ GATE_OFF = true; renderAll(); }
 
 /* ============================ BOOT ============================ */
 function renderAll(){
-  if (needGate() && !GATE_OFF){ renderGate(); return; }
+  if (needGate()){ renderGate(); return; }
   document.getElementById('brandSub').textContent = (S.profile.n1 && S.profile.n2) ? (S.profile.n1 + ' & ' + S.profile.n2 + ' · goal-based plan') : 'Goal-based planning workspace';
   renderTabs();
   if (TAB === 'dashboard') renderDashboard();
@@ -1563,7 +1568,14 @@ function renderAll(){
   flagStatus();
   if (TAB === 'settings' && isGoogleMode() && !GEMAIL) setTimeout(gRenderButton, 0);
 }
-S = load() || template();
+/* When the Google Sheet is the back end, this device keeps no copy of the plan.
+   Start empty every time and purge anything an older version left behind. */
+if (cloudOn()){
+  try { localStorage.removeItem(KEY); } catch(e){}
+  S = template();
+} else {
+  S = load() || template();
+}
 normalise();
 renderAll();
 flagStatus();
