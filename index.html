@@ -1362,8 +1362,8 @@ function gOnCred(resp){
     }
   } catch(e){}
   if (G_RES){ const r = G_RES; G_RES = G_REJ = null; r(GTOKEN); }
-  banner(''); renderAll();
-  if (cloudOn() && !CSEEN) cloudPull(true);   // straight into the plan after sign-in
+  banner('');
+  verifyAccess();   // confirm with the Sheet that this account is on the list
 }
 function gSignIn(){
   return new Promise((res, rej) => {
@@ -1386,7 +1386,7 @@ function gSignIn(){
 }
 function gSignOut(){
   GTOKEN = ''; GEXP = 0; GEMAIL = ''; GNAME = '';
-  CSEEN = '';
+  CSEEN = ''; AUTHED = false; GATE_MSG = '';
   try { google.accounts.id.disableAutoSelect(); } catch(e){}
   wipeLocal();          // leave nothing behind on this device
   renderAll();
@@ -1521,7 +1521,38 @@ function cloudStatusText(){
 /* ============================ SIGN-IN GATE ============================
    When the Sheet is the back end, there is nothing worth showing until the
    person has proved who they are — so the whole planner waits behind this. */
-function needGate(){ return cloudOn() && isGoogleMode() && !GEMAIL && !ONFILE; }
+let AUTHED = false, GATE_MSG = '';
+function needGate(){ return cloudOn() && isGoogleMode() && !AUTHED && !ONFILE; }
+
+/* Being signed in to Google proves who you are. It does not prove you are allowed
+   in here. Only the Apps Script knows that, so we ask it before opening the door. */
+async function verifyAccess(){
+  if (!cloudOn()){ AUTHED = true; renderAll(); return; }
+  GATE_MSG = '<div class="alert g" style="margin:10px 0 0">Checking your access…</div>';
+  renderGate();
+  try {
+    await cloudCall({ action:'ping' });
+    AUTHED = true; GATE_MSG = '';
+    renderAll();
+    if (!CSEEN) cloudPull(true);
+  } catch(e){
+    /* Rejected. Drop the credentials and stay on the gate. */
+    AUTHED = false; GTOKEN = ''; GEXP = 0;
+    const who = GEMAIL || 'That account';
+    GEMAIL = ''; GNAME = '';
+    try { google.accounts.id.disableAutoSelect(); } catch(err){}
+    GATE_MSG = '<div class="alert r" style="margin:10px 0 0;text-align:left">' +
+      '<b>' + esc(who) + ' cannot open this plan.</b><br>' + esc(e.message) +
+      '<div class="toolbar" style="justify-content:center;margin:10px 0 0">' +
+      '<button class="btn sm" onclick="gTryAnother()">Try a different account</button></div></div>';
+    renderGate();
+  }
+}
+function gTryAnother(){
+  GATE_MSG = ''; AUTHED = false; GTOKEN = ''; GEXP = 0; GEMAIL = ''; GNAME = ''; G_INIT = false;
+  try { google.accounts.id.disableAutoSelect(); } catch(e){}
+  renderGate();
+}
 
 function renderGate(){
   document.getElementById('tabbar').innerHTML = '';
@@ -1533,7 +1564,7 @@ function renderGate(){
       '<h2 class="ttl" style="margin-bottom:8px">Family Financial Planner</h2>' +
       '<p class="sub" style="margin:0 auto 22px;max-width:400px">Sign in with your Google account to open the plan. Only accounts on the household list can get in.</p>' +
       '<div id="gBtn" style="display:flex;justify-content:center;min-height:44px"></div>' +
-      '<div id="cloudMsg" style="margin-top:6px"></div>' +
+      '<div id="cloudMsg" style="margin-top:6px">' + GATE_MSG + '</div>' +
       '<p class="tag" style="margin-top:20px">Your figures live in a private Google Sheet, not on this page.<br>Nothing is stored on this website.</p>' +
     '</div>' +
     '<details class="bp" style="margin-top:4px"><summary>Trouble signing in?</summary><div class="bpin">' +
