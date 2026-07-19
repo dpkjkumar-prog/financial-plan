@@ -488,6 +488,11 @@ document.addEventListener('change', e => {
   const el = e.target, f = el.dataset.f;
   if (!f) return;
   const val = el.type === 'number' ? N(el.value) : el.value;
+  if (el.dataset.imp !== undefined && el.dataset.imp !== ''){
+    const row = IMP.rows[+el.dataset.imp];
+    if (row){ row[f] = val; if (f === 'cls') row.str = row.str || 'Mutual Fund'; }
+    return;                       // no re-render: keeps the cursor where it is
+  }
   if (el.dataset.list){
     const row = S[el.dataset.list].find(x => x.id === el.dataset.id);
     if (row){ row[f] = val; if (f === 'category' && CAT_INFL[val] != null) row.infl = CAT_INFL[val];
@@ -787,14 +792,17 @@ function renderCashflow(){
     kpi('Blended expense inflation', wInfl.toFixed(1) + '%', 'Weighted by spend — used as a sanity check') +
   '</div>' +
   bp(BP.cashflow) +
-  '<div class="card"><h3>Income</h3><p class="hint">Gross monthly, before tax where relevant. Add a line for each source.</p>' +
+  (IMP.open && (IMP.target === 'income' || IMP.target === 'expenses') ? renderImporter() : '') +
+  '<div class="card"><h3>Income</h3><p class="hint">Gross monthly, before tax where relevant. Add a line for each source. ' +
+    '<button class="btn sm" onclick="impOpen(\'income\')" style="margin-left:6px">Import</button></p>' +
     tbl(['Source','Whose','₹ / month',''], S.income.map(r => [
       ip('income', r.id, 'label', r.label, 'text'),
       ip('income', r.id, 'owner', r.owner, 'sel', ownerOpts()),
       ip('income', r.id, 'monthly', r.monthly, 'num'),
       delBtn('income', r.id)], ), [null,'120px','150px','90px']) +
     '<button class="btn sm" data-add="income" style="margin-top:10px">+ Add income</button></div>' +
-  '<div class="card"><h3>Expenses</h3><p class="hint">Monthly average. The inflation column feeds the retirement and long-horizon calculations — education and medical run far hotter than headline CPI.</p>' +
+  '<div class="card"><h3>Expenses</h3><p class="hint">Monthly average. The inflation column feeds the retirement and long-horizon calculations — education and medical run far hotter than headline CPI. ' +
+    '<button class="btn sm" onclick="impOpen(\'expenses\')" style="margin-left:6px">Import</button></p>' +
     tbl(['Item','Bucket','₹ / month','Inflation %',''], S.expenses.map(r => [
       ip('expenses', r.id, 'label', r.label, 'text'),
       ip('expenses', r.id, 'cat', r.cat, 'sel', ['Living','Lifestyle','Education','Debt','Protection','Family','Travel','Other']),
@@ -855,7 +863,9 @@ function renderPortfolio(){
         '<b style="min-width:78px;text-align:right;font-size:12.5px">' + inr(byStr[k]) + '</b></div>').join('') +
     '</div>' +
   '</div>' +
-  '<div class="card"><h3>Holdings</h3><p class="hint">Update values whenever you refresh statements — quarterly is enough.</p>' +
+  (IMP.open && IMP.target === 'assets' ? renderImporter() : '') +
+  '<div class="card"><h3>Holdings</h3><p class="hint">Update values whenever you refresh statements — quarterly is enough. ' +
+    '<button class="btn sm" onclick="impOpen(\'assets\')" style="margin-left:6px">Import from a statement</button></p>' +
     tbl(['Holding','Asset class','Structure','Owner','Value ₹','Exp. return %','Earmarked for',''], S.assets.map(r => [
       ip('assets', r.id, 'label', r.label, 'text'),
       ip('assets', r.id, 'cls', r.cls, 'sel', ASSET_CLASSES),
@@ -986,7 +996,9 @@ function renderProtection(){
       : '<div class="alert r">Shortfall of ' + inr(Math.max(0, emgTarget - t.liquid)) + '. Hold it in a sweep-in deposit or liquid/overnight fund — accessible within 24 hours, not in equity.</div>') +
     '<p class="hint" style="margin:0">Liquidity is measured from holdings tagged <b>Cash &amp; Liquid</b> on the Portfolio tab.</p>' +
   '</div>' +
-  '<div class="card"><h3>Policies in force</h3>' +
+  (IMP.open && IMP.target === 'insurance' ? renderImporter() : '') +
+  '<div class="card"><h3>Policies in force ' +
+    '<button class="btn sm" onclick="impOpen(\'insurance\')" style="margin-left:6px;font-weight:600">Import from documents</button></h3>' +
     tbl(['Type','Insured','Cover ₹','Annual premium ₹','Insurer','Renewal',''], S.insurance.map(r => [
       ip('insurance', r.id, 'type', r.type, 'sel', ['Term life','Health floater','Super top-up health','Personal accident','Critical illness','Home / contents','Motor','Travel','Other']),
       ip('insurance', r.id, 'person', r.person, 'sel', personOpts()),
@@ -1509,6 +1521,420 @@ function cloudStatusText(){
   return { idle:'Synced with the Sheet', dirty:'Saving to Sheet…', pushing:'Saving to Sheet…',
            pulling:'Loading from Sheet…', conflict:'Not saved — conflict', error:'Sheet unreachable',
            off:'' }[CSTATE] || '';
+}
+
+
+/* ============================================================================
+   IMPORTING FROM DOCUMENTS
+   Two routes in: a CAS (consolidated mutual-fund statement) read straight from
+   the PDF, and a paste box for anything else. Everything happens inside this
+   browser — no document is ever uploaded anywhere — and nothing reaches the
+   plan until you have looked at it and pressed the button.
+   ========================================================================== */
+let IMP = { open:false, target:'assets', rows:[], msg:'', busy:false, note:'', owner:'Joint', holder:'' };
+
+const IMP_TARGETS = {
+  assets:     { label:'holdings',  tab:'portfolio' },
+  insurance:  { label:'policies',  tab:'protection' },
+  expenses:   { label:'expenses',  tab:'cashflow' },
+  income:     { label:'income',    tab:'cashflow' }
+};
+
+function impOpen(target){ IMP = { open:true, target, rows:[], msg:'', busy:false, note:'', owner:'Joint', holder:'' }; renderAll(); }
+function impClose(){ IMP.open = false; renderAll(); }
+function impSay(kind, text){ IMP.msg = kind ? '<div class="alert ' + kind + '" style="margin:10px 0 0">' + text + '</div>' : ''; renderAll(); }
+
+/* ---- PDF reading (pdf.js, fetched only when first needed) ---- */
+function loadPdfJs(){
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise((res, rej) => {
+    const base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+    const sc = document.createElement('script');
+    sc.src = base + 'pdf.min.js';
+    sc.onload = () => {
+      try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js'; } catch(e){}
+      res(window.pdfjsLib);
+    };
+    sc.onerror = () => rej(new Error('Could not load the PDF reader. Check your internet connection.'));
+    document.head.appendChild(sc);
+  });
+}
+
+/* Turn a PDF into lines of text, keeping each line's page and vertical
+   position — the layout is what tells us which name belongs to which row. */
+async function pdfToLines(file, password){
+  const lib = await loadPdfJs();
+  const buf = await file.arrayBuffer();
+  const doc = await lib.getDocument({ data: buf, password: password || '' }).promise;
+  const out = [];
+  for (let p = 1; p <= doc.numPages; p++){
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const rows = {};
+    tc.items.forEach(it => {
+      const y = Math.round(it.transform[5]);
+      let key = y;
+      for (const k in rows){ if (Math.abs(k - y) <= 2){ key = +k; break; } }
+      (rows[key] = rows[key] || []).push({ x: it.transform[4], s: it.str });
+    });
+    Object.keys(rows).map(Number).sort((a,b) => b - a).forEach(k => {
+      const t = rows[k].sort((a,b) => a.x - b.x).map(o => o.s).join(' ').replace(/\s+/g,' ').trim();
+      if (t) out.push({ t, y: k, p });
+    });
+  }
+  return out;
+}
+
+const impMoney = t => { const n = parseFloat(String(t).replace(/[₹,\s]|INR|Rs\.?/gi,'')); return isFinite(n) ? n : 0; };
+
+/* Guess an asset class from a fund's name. */
+function guessClass(name){
+  const n = (name || '').toLowerCase();
+  if (/liquid|overnight|money market|ultra short|low duration|short duration|corporate bond|banking & psu|gilt|g-sec|debt|income fund|credit risk|dynamic bond|savings fund|treasury/.test(n)) return 'Debt / Fixed Income';
+  if (/gold|silver|commodit/.test(n)) return 'Gold & Commodities';
+  if (/hybrid|balanced|advantage|asset allocat|equity savings|multi asset|arbitrage/.test(n)) return 'Hybrid';
+  if (/us |u\.s\.|nasdaq|s&p 500|global|international|world|greater china|emerging market|overseas/.test(n)) return 'International Equity';
+  if (/liquid|elss|flexi|large|mid|small|multi|focused|value|contra|index|nifty|sensex|equity|bluechip/.test(n)) return 'Indian Equity';
+  return 'Indian Equity';
+}
+
+/* ---- CAS parsers -------------------------------------------------------
+   Two layouts in circulation. The MFCentral "Consolidated Account Summary"
+   is a wide table, one row per folio, with the scheme name often wrapping
+   across the lines above and below the figures. The older CAMS/KFintech
+   transaction statement instead states a market value per scheme in words.
+   Both are tried; whichever recognises more holdings wins. */
+
+const CAS_SKIP = /^(consolidated account|\( ?as on date|soa holdings|demat holdings|invested value|folio no|client id|scheme details|\(inr\)|units|mfcentral|page \d+ of|total\b|allocation by|pan\s*:|mobile|email|nav date|gain\/loss|balance|the consolidated|cams and kfintech|are holding|if you find|mutual fund folios)/i;
+
+const casStripDates = t => t.replace(/\b\d{1,2}-[A-Za-z]{3}-\d{2,4}\b/g, ' ');
+
+/* Everything on a line that is not a folio, date, number or percentage. */
+function casText(ln){
+  return casStripDates(ln.replace(/^\s*\d[\d\-]{4,}\s*/, ''))
+    .replace(/\([+\-]?[\d.,]+\s*%\)/g, ' ')
+    .replace(/\(-?[\d][\d,]*\.?\d*\)/g, ' ')
+    .replace(/-?\b\d[\d,]*\.?\d*\b/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s\-–,]+|[\s\-–,]+$/g, '')
+    .trim();
+}
+const casIsData = ln => /^\s*\d[\d\-]{4,}\s/.test(ln) && (casStripDates(ln).match(/\d[\d,]*\.\d+/g) || []).length >= 2;
+
+/* Whose statement is this? A CAS is compiled against a single PAN, so the
+   holder's name sits on page one. Matched loosely against the two names on
+   the Settings tab — "Dee" recognises "DEEPAK JAYAKUMAR". */
+function casCleanName(t){
+  return String(t || '').replace(/[^A-Za-z\s.]/g,' ').replace(/\s{2,}/g,' ').trim();
+}
+function detectCASHolder(L){
+  const txt = i => (typeof L[i] === 'string' ? L[i] : L[i].t) || '';
+  const looksLikeName = t => /^[A-Z][A-Z\s.]{4,60}$/.test(t.trim()) && t.trim().split(/\s+/).length <= 5;
+  for (let i = 0; i < Math.min(L.length, 40); i++){
+    const t = txt(i);
+    const m = t.match(/PAN\s*:?\s*[A-Z]{5}\d{4}[A-Z]\s*(.*)$/i);
+    if (!m) continue;
+    const tail = casCleanName(m[1]);
+    if (tail && looksLikeName(tail) && !CAS_SKIP.test(tail)) return tail;
+    for (let j = i + 1; j < Math.min(L.length, i + 8); j++){
+      const s2 = txt(j).trim();
+      if (CAS_SKIP.test(s2)) continue;
+      if (looksLikeName(s2)) return casCleanName(s2);
+    }
+  }
+  /* Some statements print the name without the PAN nearby. */
+  for (let i = 0; i < Math.min(L.length, 25); i++){
+    const t = txt(i).trim();
+    if (looksLikeName(t) && !CAS_SKIP.test(t) && !/HOLDINGS|SUMMARY|STATEMENT|MUTUAL|FUND/i.test(t)) return casCleanName(t);
+  }
+  return '';
+}
+/* Map a detected name onto one of the two people, or leave it undecided.
+   Compares every word of the statement name against both profile names on
+   shared opening letters, so "Prans" recognises "PRANAVI" and "Dee" finds
+   "DEEPAK" — while an initial alone ("D JAYAKUMAR") stays undecided. */
+function ownerFromName(nm){
+  const norm = x => String(x || '').toLowerCase().replace(/[^a-z]/g,'');
+  const parts = String(nm || '').split(/\s+/).map(norm).filter(Boolean);
+  if (!parts.length) return '';
+  const common = (a,b) => { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; return i; };
+  const score = key => {
+    const t = norm(S.profile[key]);
+    if (t.length < 3) return 0;
+    return parts.reduce((best, p) => { const c = common(p, t); return c >= 3 && c > best ? c : best; }, 0);
+  };
+  const s1 = score('n1'), s2 = score('n2');
+  if (!s1 && !s2) return '';
+  return s1 >= s2 ? 'Dee' : 'Wife';
+}
+
+/* MFCentral / CAS summary table.
+   Each holding is one row of figures, but its scheme name is often split
+   across the lines directly above and below. Rather than guess from reading
+   order, every text fragment is given to whichever row of figures it sits
+   closest to on the page — which is how a human reads the table too. */
+function parseCASSummary(L){
+  const out = [];
+  const dataIdx = [];
+  L.forEach((o, i) => { if (casIsData(o.t) && !CAS_SKIP.test(o.t.trim())) dataIdx.push(i); });
+  if (!dataIdx.length) return out;
+
+  /* Which section are we in — units held with the registrar, or in demat? */
+  const demat = new Array(L.length).fill(false);
+  let inDemat = false;
+  L.forEach((o, i) => { if (/client\s*id/i.test(o.t)) inDemat = true; demat[i] = inDemat; });
+
+  const names = {};                       // data-row index -> fragments
+  L.forEach((o, i) => {
+    if (casIsData(o.t) && !CAS_SKIP.test(o.t.trim())) return;
+    if (CAS_SKIP.test(o.t.trim())) return;
+    const txt = casText(o.t);
+    if (!txt || txt.length < 3) return;
+    let best = -1, bestD = 1e9;
+    dataIdx.forEach(d => {
+      if (L[d].p !== o.p) return;                       // same page only
+      const dist = Math.abs(L[d].y - o.y);
+      if (dist < bestD){ bestD = dist; best = d; }
+    });
+    if (best < 0 || bestD > 40) return;                 // too far to belong to any row
+    (names[best] = names[best] || []).push({ y: o.y, txt });
+  });
+
+  dataIdx.forEach(i => {
+    const ln = L[i].t;
+    const nums = casStripDates(ln.replace(/^\s*\d[\d\-]{4,}\s*/, '')).match(/-?\d[\d,]*\.?\d*/g) || [];
+    if (!nums.length) return;
+    const value = impMoney(nums[nums.length - 1]);
+    if (!(value > 0)) return;                           // dormant folios read 0.00
+
+    const own = casText(ln);
+    const frags = (names[i] || []).slice().sort((a,b) => b.y - a.y).map(f => f.txt);
+    if (own) frags.unshift(own);
+    let name = frags.join(' ').replace(/\s{2,}/g,' ').trim();
+    if (name.length < 4) return;
+
+    const folio = (ln.match(/^\s*(\d[\d\-]{4,})/) || [])[1] || '';
+    if (out.some(r => r.name === name && r.folio === folio && Math.abs(r.value - value) < 1)) return;
+    out.push({ name, value, folio, cls: guessClass(name),
+               str: demat[i] ? 'Direct Equity' : 'Mutual Fund', owner:'Joint', use:true });
+  });
+  return out;
+}
+
+/* Older transaction-style statement */
+function parseCASDetailed(L){
+  const lines = L.map(o => (typeof o === 'string' ? o : o.t));
+  const out = [];
+  let scheme = '', folio = '';
+  const push = (name, value) => {
+    if (!name || !(value > 0)) return;
+    name = name.replace(/\s+/g,' ').replace(/^[-–—\s]+|[-–—\s]+$/g,'').trim();
+    if (name.length < 4) return;
+    if (out.some(r => r.name === name && Math.abs(r.value - value) < 1)) return;
+    out.push({ name, value, folio, cls: guessClass(name), str:'Mutual Fund', owner:'Joint', use:true });
+  };
+  lines.forEach(ln => {
+    let m;
+    if ((m = ln.match(/Folio\s*No[.:\s]+([A-Z0-9][A-Z0-9\/\- ]{2,})/i))) folio = m[1].trim();
+    if (/ISIN/i.test(ln)){
+      const nm = ln.split(/ISIN/i)[0].replace(/^[A-Z0-9]{2,10}\s*[-–]\s*/, '').replace(/\(.*?Advisor.*?\)/i,'').trim();
+      if (nm.length > 6) scheme = nm;
+    } else if (/^[A-Z0-9]{3,10}\s*[-–]\s*.{6,}(fund|scheme|plan)/i.test(ln)){
+      scheme = ln.replace(/^[A-Z0-9]{3,10}\s*[-–]\s*/, '').trim();
+    }
+    if ((m = ln.match(/(?:Market\s*Value|Valuation)\s*(?:on|as\s*on)?[^:]*:?\s*(?:INR|Rs\.?|₹)?\s*([\d][\d,]*\.?\d*)/i))){
+      push(scheme, impMoney(m[1])); return;
+    }
+    const nums = ln.match(/[\d][\d,]*\.\d{2,4}/g);
+    if (nums && nums.length >= 3){
+      const nameGuess = ln.split(/\s[\d]/)[0];
+      if (/fund|scheme|plan/i.test(nameGuess)) push(nameGuess, impMoney(nums[nums.length - 1]));
+    }
+  });
+  return out;
+}
+
+function parseCAS(L){
+  const objs = L.map(o => (typeof o === 'string' ? { t:o, y:0, p:1 } : o));
+  const a = parseCASSummary(objs), b = parseCASDetailed(objs);
+  return b.length > a.length ? b : a;
+}
+
+/* ---- Free-text / pasted-table parser ---- */
+function parsePasted(text, target){
+  const out = [];
+  text.split(/\r?\n/).forEach(raw => {
+    const ln = raw.replace(/\s+/g,' ').trim();
+    if (!ln || ln.length < 3) return;
+    if (/^(total|grand total|sub ?total|page \d)/i.test(ln)) return;
+    const nums = ln.match(/(?:₹|INR|Rs\.?)?\s?[\d][\d,]*(?:\.\d+)?/g);
+    if (!nums) return;
+    const vals = nums.map(impMoney).filter(v => v >= 100);
+    if (!vals.length) return;
+    /* Cut the label at the first real amount, not at any stray digit —
+       otherwise "HDFC Life Click 2 Protect" loses everything after the 2. */
+    let cut = ln.length;
+    const re = /(?:₹|INR|Rs\.?)?\s?([\d][\d,]*(?:\.\d+)?)/g;
+    let mm;
+    while ((mm = re.exec(ln)) !== null){
+      if (impMoney(mm[1]) >= 100){ cut = mm.index; break; }
+    }
+    let label = ln.slice(0, cut)
+      .replace(/\b(sum\s*assured|cover|premium|value|amount|balance|units?|nav)\b[:\s-]*$/i,'')
+      .replace(/[\t,;:|\-–]+$/,'').trim();
+    if (label.length < 3) label = ln.slice(0, 40);
+    if (target === 'insurance'){
+      const big = Math.max.apply(null, vals), small = vals.length > 1 ? Math.min.apply(null, vals) : 0;
+      out.push({ name: label, type: /health|medic|floater/i.test(label) ? 'Health floater' : /accident/i.test(label) ? 'Personal accident' : /critical/i.test(label) ? 'Critical illness' : 'Term life',
+                 person:'Dee', cover: big, premium: small, use:true });
+    } else if (target === 'assets'){
+      out.push({ name: label, value: Math.max.apply(null, vals), cls: guessClass(label), str:'Mutual Fund', owner:'Joint', use:true });
+    } else {
+      out.push({ name: label, value: vals[vals.length - 1], cat:'Living', owner:'Joint', use:true });
+    }
+  });
+  return out;
+}
+
+/* ---- Handlers ---- */
+async function impReadPdf(ev){
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if (!f) return;
+  const pw = (document.getElementById('impPw') || {}).value || '';
+  IMP.busy = true; impSay('g', 'Reading ' + esc(f.name) + '…');
+  try {
+    const lines = await pdfToLines(f, pw);
+    if (!lines.length) throw new Error('No text found. If this is a scanned document, the figures are an image and cannot be read.');
+    const rows = IMP.target === 'assets' ? parseCAS(lines) : [];
+    const fallback = rows.length ? rows : parsePasted(lines.map(o => o.t).join('\n'), IMP.target);
+
+    /* Work out whose statement this is and tag every row with it. */
+    IMP.holder = detectCASHolder(lines);
+    const guess = ownerFromName(IMP.holder);
+    IMP.owner = guess || IMP.owner || 'Joint';
+    fallback.forEach(r => { if (IMP.target === 'assets') r.owner = IMP.owner; else if (IMP.target === 'insurance') r.person = IMP.owner; });
+
+    IMP.rows = fallback;
+    IMP.busy = false;
+    if (!fallback.length){
+      impSay('a', 'Read ' + lines.length + ' lines but recognised no holdings. Try the paste box below, or send me a sample and I will adjust the parser.');
+    } else {
+      const who = IMP.holder
+        ? (guess ? 'Held by <b>' + esc(IMP.holder) + '</b> — tagged to ' + esc(ownerLabel(guess)) + '.'
+                 : 'Statement is in the name of <b>' + esc(IMP.holder) + '</b>, which matches neither name on the Settings tab. Choose the owner below.')
+        : 'Could not tell whose statement this is. Choose the owner below.';
+      impSay(guess ? 'g' : 'a', 'Found ' + fallback.length + ' holding(s) in ' + esc(f.name) + '. ' + who + ' Check the rows before importing.');
+    }
+  } catch(e){
+    IMP.busy = false;
+    const msg = /password/i.test(e.message || '')
+      ? 'That PDF is password protected. Enter the password above and choose the file again.'
+      : esc(e.message || String(e));
+    impSay('r', msg);
+  }
+}
+function impReadPaste(){
+  const el = document.getElementById('impText');
+  const txt = el ? el.value : '';
+  if (!txt.trim()) return impSay('a', 'Paste something first.');
+  IMP.rows = parsePasted(txt, IMP.target);
+  impSay(IMP.rows.length ? 'g' : 'a',
+    IMP.rows.length ? 'Found ' + IMP.rows.length + ' row(s). Check them before importing.'
+                    : 'Nothing recognisable. Each line needs a description and an amount.');
+}
+function impToggle(i){ IMP.rows[i].use = !IMP.rows[i].use; renderAll(); }
+function impSetOwner(v){
+  IMP.owner = v;
+  IMP.rows.forEach(r => { if (IMP.target === 'insurance') r.person = v; else r.owner = v; });
+  renderAll();
+}
+function impAll(v){ IMP.rows.forEach(r => r.use = v); renderAll(); }
+
+function impCommit(){
+  const keep = IMP.rows.filter(r => r.use);
+  if (!keep.length) return impSay('a', 'Nothing ticked.');
+  keep.forEach(r => {
+    if (IMP.target === 'assets')
+      S.assets.push({ id:uid(), label:r.name, cls:r.cls, str:r.str || 'Mutual Fund', owner:r.owner || 'Joint',
+                      value:N(r.value), ret:CLASS_RET[r.cls] || 10, earmark:'' });
+    else if (IMP.target === 'insurance')
+      S.insurance.push({ id:uid(), type:r.type, person:r.person || 'Dee', cover:N(r.cover),
+                         premium:N(r.premium), provider:r.name || '', renew:'' });
+    else if (IMP.target === 'expenses')
+      S.expenses.push({ id:uid(), label:r.name, cat:r.cat || 'Living', monthly:N(r.value), infl:N(S.profile.genInfl) || 6 });
+    else if (IMP.target === 'income')
+      S.income.push({ id:uid(), label:r.name, owner:r.owner || 'Joint', monthly:N(r.value) });
+  });
+  const n = keep.length, what = IMP_TARGETS[IMP.target].label;
+  IMP.open = false;
+  save(); renderAll();
+  banner('info', n + ' ' + what + ' imported. Check the figures and adjust anything the reader got wrong.');
+}
+
+/* ---- The importer panel ---- */
+function renderImporter(){
+  if (!IMP.open) return '';
+  const t = IMP.target, isAssets = t === 'assets', isIns = t === 'insurance';
+  const head = isAssets ? ['Use','Holding','Value ₹','Asset class','Owner']
+             : isIns    ? ['Use','Insurer / description','Type','Insured','Cover ₹','Annual premium ₹']
+             :            ['Use','Description', t === 'income' ? 'Owner' : 'Bucket', '₹ per month'];
+
+  const body = IMP.rows.map((r,i) => {
+    const tick = '<input type="checkbox"' + (r.use ? ' checked' : '') + ' onchange="impToggle(' + i + ')" style="width:auto">';
+    const nm = '<input type="text" value="' + esc(r.name) + '" data-imp="' + i + '" data-f="name">';
+    if (isAssets) return '<tr><td>' + tick + '</td><td>' + nm +
+      '</td><td><input class="num" type="number" step="any" value="' + N(r.value) + '" data-imp="' + i + '" data-f="value"></td>' +
+      '<td><select data-imp="' + i + '" data-f="cls">' + optHtml(ASSET_CLASSES, r.cls) + '</select></td>' +
+      '<td><select data-imp="' + i + '" data-f="owner">' + optHtml(ownerOpts(), r.owner) + '</select></td></tr>';
+    if (isIns) return '<tr><td>' + tick + '</td><td>' + nm +
+      '</td><td><select data-imp="' + i + '" data-f="type">' + optHtml(['Term life','Health floater','Super top-up health','Personal accident','Critical illness','Home / contents','Motor','Travel','Other'], r.type) + '</select></td>' +
+      '<td><select data-imp="' + i + '" data-f="person">' + optHtml(personOpts(), r.person) + '</select></td>' +
+      '<td><input class="num" type="number" step="any" value="' + N(r.cover) + '" data-imp="' + i + '" data-f="cover"></td>' +
+      '<td><input class="num" type="number" step="any" value="' + N(r.premium) + '" data-imp="' + i + '" data-f="premium"></td></tr>';
+    return '<tr><td>' + tick + '</td><td>' + nm + '</td><td>' +
+      (t === 'income'
+        ? '<select data-imp="' + i + '" data-f="owner">' + optHtml(ownerOpts(), r.owner) + '</select>'
+        : '<select data-imp="' + i + '" data-f="cat">' + optHtml(['Living','Lifestyle','Education','Debt','Protection','Family','Travel','Other'], r.cat) + '</select>') +
+      '</td><td><input class="num" type="number" step="any" value="' + N(r.value) + '" data-imp="' + i + '" data-f="value"></td></tr>';
+  }).join('');
+
+  return '<div class="card" style="border-color:#C79A3A">' +
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<h3 style="margin:0;flex:1">Import ' + IMP_TARGETS[t].label + ' from a document</h3>' +
+      '<button class="btn sm" onclick="impClose()">Close</button></div>' +
+    '<p class="hint">Everything is read inside this browser. The file is never uploaded, and nothing joins your plan until you press Import at the bottom.</p>' +
+    (isAssets
+      ? '<div class="grid g2">' +
+          fld('1. Consolidated account statement (CAS) as a PDF',
+              '<input type="file" accept="application/pdf" onchange="impReadPdf(event)">') +
+          fld('PDF password, if it has one', '<input id="impPw" type="password" placeholder="usually your PAN in capitals">') +
+        '</div>' +
+        '<p class="hint" style="margin:-4px 0 12px">Request a CAS from <a href="https://www.camsonline.com/Investors/Statements/Consolidated-Account-Statement" target="_blank" rel="noopener">CAMS</a> or <a href="https://mfs.kfintech.com/investor/General/ConsolidatedAccountStatement" target="_blank" rel="noopener">KFintech</a> — it arrives by email covering every fund house.</p>'
+      : '<div class="grid g2">' + fld('Read a PDF', '<input type="file" accept="application/pdf" onchange="impReadPdf(event)">') +
+        fld('PDF password, if it has one', '<input id="impPw" type="password">') + '</div>') +
+    (IMP.rows.length
+      ? '<div class="grid g2" style="margin-top:4px">' +
+          fld('Whose ' + (isIns ? 'policies' : 'holdings') + ' are these?',
+              '<select onchange="impSetOwner(this.value)">' + optHtml(ownerOpts(), IMP.owner) + '</select>') +
+          '<div class="field"><label>Read from the document</label><div style="padding-top:7px">' +
+            (IMP.holder ? '<b>' + esc(IMP.holder) + '</b>' : '<span class="tag">no name found</span>') +
+          '</div></div></div>'
+      : '') +
+    fld((isAssets ? '2. ' : '') + 'Or paste text — from a PDF, a statement, an email, a spreadsheet',
+        '<textarea id="impText" rows="5" placeholder="One item per line, each with an amount. For example:&#10;HDFC Flexi Cap Fund   12,45,000&#10;ICICI Pru Bluechip    8,20,500"></textarea>') +
+    '<div class="toolbar"><button class="btn" onclick="impReadPaste()">Read the pasted text</button>' +
+      (IMP.rows.length ? '<button class="btn sm" onclick="impAll(true)">Tick all</button><button class="btn sm" onclick="impAll(false)">Untick all</button>' : '') +
+    '</div>' + IMP.msg +
+    (IMP.rows.length
+      ? '<div style="margin-top:14px">' + tbl(head, []) .replace('<tbody></tbody>', '<tbody>' + body + '</tbody>') +
+        '<div class="toolbar" style="margin-top:12px">' +
+          '<button class="btn pri" onclick="impCommit()">Import the ticked rows</button>' +
+          '<span class="tag">' + IMP.rows.filter(r => r.use).length + ' of ' + IMP.rows.length + ' selected</span></div>' +
+        '<div class="note" style="margin-top:10px">Read every row before importing. Document layouts vary between providers and change over time, so treat this as a first draft that saves typing — not as a source of truth. Correct anything here, or after importing on the tab itself.</div>' +
+        '</div>'
+      : '') +
+  '</div>';
 }
 
 /* ============================ SIGN-IN GATE ============================
