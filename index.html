@@ -114,7 +114,6 @@ details.bp .bpin li b{color:#3D3210}
   <div class="wrap">
     <div class="brand">Family Financial Planner<small id="brandSub">Goal-based planning workspace</small></div>
     <div class="spacer"></div>
-    <select id="whoami" onchange="setMe(this.value)" style="width:auto;background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.32);color:#fff"></select>
     <span class="saveflag" id="saveflag"></span>
     <span id="fsBtns"></span>
     <button class="btn ghost" onclick="doExport()">Export</button>
@@ -343,7 +342,7 @@ let S = null, TAB = 'dashboard', OPEN = {};
 
 function save(){
   S.meta = S.meta || {};
-  S.meta.by = ME || 'someone';
+  S.meta.by = GNAME || GEMAIL || ME || 'someone';   // verified at sign-in
   S.meta.at = new Date().toISOString();
   /* With the Sheet as the back end nothing is written to this device — no cached
      copy of the plan exists for anyone to open without signing in. */
@@ -1286,9 +1285,6 @@ function banner(kind, html){
   el.innerHTML = kind ? '<div class="bn ' + kind + '">' + html + '</div>' : '';
 }
 function flagStatus(){
-  const who = document.getElementById('whoami');
-  if (who) who.innerHTML = ['', S.profile.n1, S.profile.n2].map(n =>
-    '<option value="' + esc(n) + '"' + (n === ME ? ' selected' : '') + '>' + (n ? esc(n) : 'Who is this?') + '</option>').join('');
   const html = cloudOn()
     ? '<button class="btn ghost" onclick="cloudPull()">Load from Sheet</button><button class="btn ghost" onclick="cloudPush(false)">Save to Sheet</button>'
     : (!FS_OK
@@ -1356,10 +1352,7 @@ function gOnCred(resp){
   try {
     const p = JSON.parse(decodeURIComponent(escape(atob(GTOKEN.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
     GEXP = N(p.exp) * 1000; GEMAIL = p.email || ''; GNAME = p.given_name || p.name || p.email || '';
-    if (!ME && GNAME){
-      if (GNAME === S.profile.n1 || GEMAIL === S.profile.e1) setMe(S.profile.n1);
-      else if (GNAME === S.profile.n2) setMe(S.profile.n2);
-    }
+    if (GNAME || GEMAIL) setMe(GNAME || GEMAIL);
   } catch(e){}
   if (G_RES){ const r = G_RES; G_RES = G_REJ = null; r(GTOKEN); }
   banner('');
